@@ -1,0 +1,7 @@
+{
+  "name": "Nova AI",
+  "description": "Smart AI chat assistant with private peer-to-peer messaging and real-time response delivery",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
