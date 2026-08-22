@@ -132,10 +132,11 @@ fun UserChatScreen(
                     OutlinedTextField(
                         value = uiState.inputText,
                         onValueChange = { viewModel.onInputTextChanged(it) },
+                        enabled = !isWaitingForReply,
                         placeholder = {
                             Text(
-                                text = stringResource(R.string.input_hint),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                text = if (isWaitingForReply) stringResource(R.string.generating_response) else stringResource(R.string.input_hint),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (isWaitingForReply) 0.8f else 0.6f),
                                 style = MaterialTheme.typography.bodyMedium
                             )
                         },
@@ -148,13 +149,16 @@ fun UserChatScreen(
                             unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
                             focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
                             unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                            disabledBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                            disabledTextColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                             focusedTextColor = MaterialTheme.colorScheme.onSurface,
                             unfocusedTextColor = MaterialTheme.colorScheme.onSurface
                         ),
                         maxLines = 4,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                         keyboardActions = KeyboardActions(
-                            onSend = { viewModel.sendMessage() }
+                            onSend = { if (!isWaitingForReply) viewModel.sendMessage() }
                         )
                     )
 
@@ -162,7 +166,7 @@ fun UserChatScreen(
 
                     FilledIconButton(
                         onClick = { viewModel.sendMessage() },
-                        enabled = uiState.inputText.isNotBlank(),
+                        enabled = uiState.inputText.isNotBlank() && !isWaitingForReply,
                         modifier = Modifier
                             .size(48.dp)
                             .testTag("send_message_button"),
@@ -177,7 +181,7 @@ fun UserChatScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.Send,
                             contentDescription = "Send",
-                            tint = if (uiState.inputText.isNotBlank()) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                            tint = if (uiState.inputText.isNotBlank() && !isWaitingForReply) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                             modifier = Modifier.size(20.dp)
                         )
                     }

@@ -46,6 +46,7 @@ class UserChatViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun sendMessage(text: String = _uiState.value.inputText) {
+        if (isWaitingForReply.value) return
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return
 
