@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.Dispatcher
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -26,13 +27,19 @@ class ClientP2PTransport(
     private val context: Context,
     private val p2pDiscovery: P2PDiscovery
 ) {
-
     private val scope = CoroutineScope(Dispatchers.IO)
     private var pollJob: Job? = null
 
+    // Increase OkHttp limits so long-poll requests don't starve message dispatch
+    private val dispatcher = Dispatcher().apply {
+        maxRequests = 50
+        maxRequestsPerHost = 20
+    }
+
     private val httpClient = OkHttpClient.Builder()
+        .dispatcher(dispatcher)
         .connectTimeout(5, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(25, TimeUnit.SECONDS)
         .writeTimeout(5, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
@@ -115,13 +122,11 @@ class ClientP2PTransport(
                 } catch (e: Exception) {
                     consecutiveFailures++
                     if (consecutiveFailures > 2) {
-                        // If localhost fails, try searching again or toggle status
                         _connectionState.value = P2PConnectionState.OFFLINE
                     }
                     delay(2000)
                 }
 
-                // Brief yield before next poll cycle
                 delay(300)
             }
         }
@@ -159,7 +164,6 @@ class ClientP2PTransport(
             }
         } catch (e: Exception) {
             Log.e(TAG, "Send message failed: ${e.message}")
-            _connectionState.value = P2PConnectionState.OFFLINE
             false
         }
     }

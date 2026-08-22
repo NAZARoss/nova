@@ -21,11 +21,13 @@ import java.io.InputStreamReader
 import java.io.PrintWriter
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.util.concurrent.ConcurrentHashMap
 
 class AdminP2PServer(val port: Int = 8888) {
 
-    private val scope = CoroutineScope(Dispatchers.IO)
+    // Larger thread parallelism to prevent long-poll locks from starving POST requests
+    private val scope = CoroutineScope(Dispatchers.IO.limitedParallelism(512))
     private var serverJob: Job? = null
     private var serverSocket: ServerSocket? = null
 
@@ -61,6 +63,7 @@ class AdminP2PServer(val port: Int = 8888) {
                         null
                     } ?: break
 
+                    clientSocket.soTimeout = 60000
                     launch {
                         handleClientConnection(clientSocket)
                     }
@@ -87,6 +90,9 @@ class AdminP2PServer(val port: Int = 8888) {
         }
         serverJob?.cancel()
         serverJob = null
+
+        activePollWaiters.values.forEach { it.cancel() }
+        activePollWaiters.clear()
     }
 
     fun queueReplyForUser(userId: String, reply: P2PMessagePayload) {
@@ -109,7 +115,12 @@ class AdminP2PServer(val port: Int = 8888) {
             val reader = BufferedReader(InputStreamReader(socket.getInputStream(), Charsets.UTF_8))
             val writer = PrintWriter(socket.getOutputStream(), true)
 
-            val requestLine = reader.readLine() ?: return@withContext
+            val requestLine = try {
+                reader.readLine()
+            } catch (e: SocketTimeoutException) {
+                return@withContext
+            } ?: return@withContext
+
             val parts = requestLine.split(" ")
             if (parts.size < 2) return@withContext
 
@@ -118,12 +129,17 @@ class AdminP2PServer(val port: Int = 8888) {
 
             // Read HTTP headers
             var contentLength = 0
-            var line: String? = reader.readLine()
-            while (!line.isNullOrEmpty()) {
-                if (line.lowercase().startsWith("content-length:")) {
-                    contentLength = line.substring(15).trim().toIntOrNull() ?: 0
-                }
+            var line: String? = null
+            try {
                 line = reader.readLine()
+                while (!line.isNullOrEmpty()) {
+                    if (line.lowercase().startsWith("content-length:")) {
+                        contentLength = line.substring(15).trim().toIntOrNull() ?: 0
+                    }
+                    line = reader.readLine()
+                }
+            } catch (e: SocketTimeoutException) {
+                return@withContext
             }
 
             // Read Body
@@ -132,9 +148,13 @@ class AdminP2PServer(val port: Int = 8888) {
                 val bodyChars = CharArray(contentLength)
                 var totalRead = 0
                 while (totalRead < contentLength) {
-                    val read = reader.read(bodyChars, totalRead, contentLength - totalRead)
-                    if (read == -1) break
-                    totalRead += read
+                    try {
+                        val read = reader.read(bodyChars, totalRead, contentLength - totalRead)
+                        if (read == -1) break
+                        totalRead += read
+                    } catch (e: SocketTimeoutException) {
+                        break
+                    }
                 }
                 bodyBuilder.append(bodyChars, 0, totalRead)
             }

@@ -14,9 +14,10 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.net.DatagramPacket
-import java.net.DatagramSocket
 import java.net.InetAddress
+import java.net.MulticastSocket
 import java.net.NetworkInterface
+import java.net.SocketTimeoutException
 
 class P2PDiscovery(private val context: Context) {
 
@@ -43,10 +44,12 @@ class P2PDiscovery(private val context: Context) {
     fun startAdminBeacon(port: Int = 8888, adminId: String = "ADMIN-PRIMARY") {
         stopAdminBeacon()
         beaconJob = scope.launch {
-            var socket: DatagramSocket? = null
+            var socket: MulticastSocket? = null
             try {
-                socket = DatagramSocket()
+                socket = MulticastSocket()
+                socket.reuseAddress = true
                 socket.broadcast = true
+                val multicastGroup = InetAddress.getByName(MULTICAST_GROUP)
 
                 while (isActive) {
                     val localIp = getLocalIpAddress() ?: "127.0.0.1"
@@ -59,20 +62,18 @@ class P2PDiscovery(private val context: Context) {
                     }
                     val data = json.toString().toByteArray(Charsets.UTF_8)
                     
-                    // Broadcast to standard subnet broadcast addresses
-                    val targets = listOf(
-                        InetAddress.getByName("255.255.255.255"),
-                        InetAddress.getByName("127.0.0.1")
-                    )
-                    for (target in targets) {
+                    val packet = DatagramPacket(data, data.size, multicastGroup, DISCOVERY_PORT)
+                    try {
+                        socket.send(packet)
+                        // Broadcast fallback
                         try {
-                            val packet = DatagramPacket(data, data.size, target, DISCOVERY_PORT)
-                            socket.send(packet)
-                        } catch (e: Exception) {
-                            // Target might not be reachable
-                        }
+                            val broadcastPacket = DatagramPacket(data, data.size, InetAddress.getByName("255.255.255.255"), DISCOVERY_PORT)
+                            socket.send(broadcastPacket)
+                        } catch (e: Exception) { /* ignore */ }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Beacon send error: ${e.message}")
                     }
-                    delay(2000)
+                    delay(1500)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Beacon error: ${e.message}")
@@ -96,32 +97,53 @@ class P2PDiscovery(private val context: Context) {
         }
 
         listenerJob = scope.launch {
-            var socket: DatagramSocket? = null
+            var socket: MulticastSocket? = null
             try {
-                socket = DatagramSocket(DISCOVERY_PORT)
-                socket.broadcast = true
+                socket = MulticastSocket(DISCOVERY_PORT)
+                socket.reuseAddress = true
+                socket.soTimeout = 3000
+                val multicastGroup = InetAddress.getByName(MULTICAST_GROUP)
+                try {
+                    socket.joinGroup(multicastGroup)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not join multicast group: ${e.message}")
+                }
+                
                 val buffer = ByteArray(1024)
+                var lastAdminIp: String? = null
 
                 while (isActive) {
                     val packet = DatagramPacket(buffer, buffer.size)
-                    socket.receive(packet)
-                    val text = String(packet.data, 0, packet.length, Charsets.UTF_8)
                     try {
+                        socket.receive(packet)
+                        val text = String(packet.data, 0, packet.length, Charsets.UTF_8)
                         val json = JSONObject(text)
                         if (json.optString("type") == "NOVA_ADMIN_BEACON") {
                             val ip = packet.address.hostAddress ?: json.optString("ip", "127.0.0.1")
                             val port = json.optInt("port", 8888)
-                            _discoveredAdminIp.value = ip
-                            onAdminFound(ip, port)
+                            if (ip != lastAdminIp) {
+                                lastAdminIp = ip
+                                _discoveredAdminIp.value = ip
+                                onAdminFound(ip, port)
+                            }
                         }
+                    } catch (e: SocketTimeoutException) {
+                        continue
                     } catch (e: Exception) {
-                        // Malformed packet
+                        if (isActive) {
+                            Log.w(TAG, "Discovery receive error: ${e.message}")
+                        }
+                        delay(500)
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Discovery listener error: ${e.message}")
+                if (isActive) {
+                    Log.e(TAG, "Discovery listener error: ${e.message}")
+                }
             } finally {
-                socket?.close()
+                try {
+                    socket?.close()
+                } catch (e: Exception) { /* ignore */ }
                 try {
                     if (multicastLock?.isHeld == true) {
                         multicastLock?.release()
@@ -151,6 +173,7 @@ class P2PDiscovery(private val context: Context) {
             while (interfaces.hasMoreElements()) {
                 val iface = interfaces.nextElement()
                 if (iface.isLoopback || !iface.isUp) continue
+                if (iface.name?.startsWith("docker") == true || iface.name?.startsWith("veth") == true) continue
                 val addresses = iface.inetAddresses
                 while (addresses.hasMoreElements()) {
                     val addr = addresses.nextElement()
@@ -168,5 +191,6 @@ class P2PDiscovery(private val context: Context) {
     companion object {
         private const val TAG = "P2PDiscovery"
         const val DISCOVERY_PORT = 8889
+        const val MULTICAST_GROUP = "239.255.255.250"
     }
 }
