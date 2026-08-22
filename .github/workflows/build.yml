@@ -26,18 +26,12 @@ jobs:
 
     - name: Create required environment files
       run: |
-        # Создаем пустой файл .env.example, который требует сборщик
         touch .env.example
         touch .env
 
     - name: Create mock google-services.json
       run: |
-        # Автоматически находим package name (namespace) внутри build.gradle.kts
-        PACKAGE_NAME=$(grep -oP 'namespace = "\K[^"]+' app/build.gradle.kts || echo "com.example.nova")
-        echo "Detected package name: $PACKAGE_NAME"
-        
-        # Генерируем правильный JSON с актуальным именем пакета приложения
-        echo '{"project_info":{"project_number":"123","project_id":"mock-id","storage_bucket":"mock.appspot.com"},"client":[{"client_info":{"mobilesdk_app_id":"1:123:android:123","android_client_info":{"package_name":"'$PACKAGE_NAME'"}},"api_key":[{"current_key":"mock-key"}],"services":{"appinvite_service":{"status":1}}}]}' > app/google-services.json
+        echo '{"project_info":{"project_number":"123","project_id":"mock-id","storage_bucket":"://appspot.com"},"client":[{"client_info":{"mobilesdk_app_id":"1:123:android:123","android_client_info":{"package_name":"com.aistudio.novaai.r7k4p"}},"api_key":[{"current_key":"mock-key"}],"services":{"appinvite_service":{"status":1}}}]}' > app/google-services.json
 
     - name: Create debug keystore
       run: |
