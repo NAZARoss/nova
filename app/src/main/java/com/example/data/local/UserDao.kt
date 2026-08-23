@@ -16,6 +16,9 @@ interface UserDao {
     @Query("SELECT * FROM users WHERE id = :id LIMIT 1")
     suspend fun getUserById(id: String): UserEntity?
 
+    @Query("SELECT * FROM users WHERE id = :id LIMIT 1")
+    fun getUserFlowById(id: String): Flow<UserEntity?>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertUser(user: UserEntity): Long
 
@@ -24,6 +27,9 @@ interface UserDao {
 
     @Query("UPDATE users SET isOnline = :isOnline, lastSeen = :timestamp WHERE id = :userId")
     suspend fun updateUserOnlineStatus(userId: String, isOnline: Boolean, timestamp: Long)
+
+    @Query("UPDATE users SET selectedAiRole = :role, lastSeen = :timestamp WHERE id = :userId")
+    suspend fun updateUserAiRole(userId: String, role: String, timestamp: Long)
 
     @Query("UPDATE users SET totalMessages = totalMessages + 1, lastSeen = :timestamp WHERE id = :userId")
     suspend fun incrementUserMessages(userId: String, timestamp: Long)

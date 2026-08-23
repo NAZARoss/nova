@@ -36,7 +36,6 @@ import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.RocketLaunch
-import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
@@ -51,12 +50,17 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -66,14 +70,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
+import com.example.data.model.PrankCommands
 import com.example.ui.components.AITypingIndicator
 import com.example.ui.components.ChatMessageBubble
 import com.example.ui.components.ConnectionStatusBar
 import com.example.ui.components.UserChatTopBar
+import com.example.util.FlashlightHelper
 import com.example.viewmodel.UserChatViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -82,14 +89,55 @@ fun UserChatScreen(
     onNavigateToSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val isWaitingForReply by viewModel.isWaitingForReply.collectAsStateWithLifecycle()
     val connectionState by viewModel.connectionState.collectAsStateWithLifecycle()
     val colabServerUrl by viewModel.colabServerUrl.collectAsStateWithLifecycle()
     val colabStatus by viewModel.colabConnectionStatus.collectAsStateWithLifecycle()
+    val aiRole by viewModel.aiRole.collectAsStateWithLifecycle()
 
     val listState = rememberLazyListState()
+
+    // Blinking effect state
+    var isBlinkWhite by remember { mutableStateOf(false) }
+
+    // Hardware Flashlight controller
+    val flashlightHelper = remember { FlashlightHelper(context) }
+    DisposableEffect(Unit) {
+        onDispose {
+            flashlightHelper.setTorch(false)
+        }
+    }
+
+    // Listen to incoming Prank events from Admin
+    LaunchedEffect(Unit) {
+        viewModel.prankEvents.collect { prankType ->
+            when (prankType) {
+                PrankCommands.TYPE_BLINK -> {
+                    repeat(8) {
+                        isBlinkWhite = true
+                        delay(80)
+                        isBlinkWhite = false
+                        delay(80)
+                    }
+                }
+                PrankCommands.TYPE_FLASHLIGHT_ON -> {
+                    flashlightHelper.setTorch(true)
+                }
+                PrankCommands.TYPE_FLASHLIGHT_OFF -> {
+                    flashlightHelper.setTorch(false)
+                }
+                PrankCommands.TYPE_BLOOD_RED_ON -> {
+                    viewModel.setBloodRedMode(true)
+                }
+                PrankCommands.TYPE_BLOOD_RED_OFF -> {
+                    viewModel.setBloodRedMode(false)
+                }
+            }
+        }
+    }
 
     // Auto-scroll on new message or typing state change
     LaunchedEffect(messages.size, isWaitingForReply) {
@@ -102,175 +150,199 @@ fun UserChatScreen(
     val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
     val todayTime = timeFormat.format(Date())
 
-    Scaffold(
-        topBar = {
-            Column {
-                UserChatTopBar(
-                    onClearChatClick = { viewModel.openClearDialog() },
-                    onSettingsClick = onNavigateToSettings,
-                    isColabConfigured = colabServerUrl.isNotBlank(),
-                    colabStatus = colabStatus
-                )
-                if (colabServerUrl.isBlank()) {
-                    ConnectionStatusBar(connectionState = connectionState)
+    Box(modifier = modifier.fillMaxSize()) {
+        Scaffold(
+            topBar = {
+                Column {
+                    UserChatTopBar(
+                        onClearChatClick = { viewModel.openClearDialog() },
+                        onSettingsClick = onNavigateToSettings,
+                        onRoleClick = { viewModel.openRoleEditDialog() },
+                        aiRole = aiRole,
+                        isColabConfigured = colabServerUrl.isNotBlank(),
+                        colabStatus = colabStatus
+                    )
+                    if (colabServerUrl.isBlank()) {
+                        ConnectionStatusBar(connectionState = connectionState)
+                    }
                 }
-            }
-        },
-        bottomBar = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surface)
-                    .navigationBarsPadding()
-                    .imePadding()
-            ) {
-                HorizontalDivider(
-                    thickness = 1.dp,
-                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
-                )
-
-                Row(
+            },
+            bottomBar = {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .background(MaterialTheme.colorScheme.surface)
+                        .navigationBarsPadding()
+                        .imePadding()
                 ) {
-                    OutlinedTextField(
-                        value = uiState.inputText,
-                        onValueChange = { viewModel.onInputTextChanged(it) },
-                        enabled = !isWaitingForReply,
-                        placeholder = {
-                            Text(
-                                text = if (isWaitingForReply) stringResource(R.string.generating_response) else stringResource(R.string.input_hint),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (isWaitingForReply) 0.8f else 0.6f),
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        },
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("chat_input_field"),
-                        shape = RoundedCornerShape(24.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
-                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                            disabledBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-                            disabledTextColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                            focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                            unfocusedTextColor = MaterialTheme.colorScheme.onSurface
-                        ),
-                        maxLines = 4,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                        keyboardActions = KeyboardActions(
-                            onSend = { if (!isWaitingForReply) viewModel.sendMessage() }
-                        )
+                    HorizontalDivider(
+                        thickness = 1.dp,
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
                     )
 
-                    Spacer(modifier = Modifier.width(10.dp))
-
-                    FilledIconButton(
-                        onClick = { viewModel.sendMessage() },
-                        enabled = uiState.inputText.isNotBlank() && !isWaitingForReply,
+                    Row(
                         modifier = Modifier
-                            .size(48.dp)
-                            .testTag("send_message_button"),
-                        shape = CircleShape,
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = MaterialTheme.colorScheme.onPrimary,
-                            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-                        )
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.Send,
-                            contentDescription = "Send",
-                            tint = if (uiState.inputText.isNotBlank() && !isWaitingForReply) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                            modifier = Modifier.size(20.dp)
+                        OutlinedTextField(
+                            value = uiState.inputText,
+                            onValueChange = { viewModel.onInputTextChanged(it) },
+                            enabled = !isWaitingForReply,
+                            placeholder = {
+                                Text(
+                                    text = if (isWaitingForReply) stringResource(R.string.generating_response) else stringResource(R.string.input_hint),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (isWaitingForReply) 0.8f else 0.6f),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("chat_input_field"),
+                            shape = RoundedCornerShape(24.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+                                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                disabledBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                                disabledTextColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface
+                            ),
+                            maxLines = 4,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                            keyboardActions = KeyboardActions(
+                                onSend = { if (!isWaitingForReply) viewModel.sendMessage() }
+                            )
+                        )
+
+                        Spacer(modifier = Modifier.width(10.dp))
+
+                        FilledIconButton(
+                            onClick = { viewModel.sendMessage() },
+                            enabled = uiState.inputText.isNotBlank() && !isWaitingForReply,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .testTag("send_message_button"),
+                            shape = CircleShape,
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = MaterialTheme.colorScheme.onPrimary,
+                                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                            )
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Send,
+                                contentDescription = "Send",
+                                tint = if (uiState.inputText.isNotBlank() && !isWaitingForReply) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
+                    // Clean Minimal Version Footer
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 6.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "VERSION 1.0.4-BUILD_STABLE",
+                            style = MaterialTheme.typography.labelSmall,
+                            letterSpacing = 1.5.sp,
+                            fontSize = 8.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
                         )
                     }
                 }
-
-                // Clean Minimal Version Footer
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 6.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "VERSION 1.0.4-BUILD_STABLE",
-                        style = MaterialTheme.typography.labelSmall,
-                        letterSpacing = 1.5.sp,
-                        fontSize = 8.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+            },
+            modifier = Modifier.fillMaxSize()
+        ) { innerPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .background(MaterialTheme.colorScheme.background)
+            ) {
+                if (messages.isEmpty() && !isWaitingForReply) {
+                    EmptyChatHero(
+                        onSelectPrompt = { prompt ->
+                            viewModel.selectPromptChip(prompt)
+                        },
+                        modifier = Modifier.fillMaxSize()
                     )
-                }
-            }
-        },
-        modifier = modifier.fillMaxSize()
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .background(MaterialTheme.colorScheme.background)
-        ) {
-            if (messages.isEmpty()) {
-                EmptyChatHero(
-                    onSelectPrompt = { viewModel.selectPromptChip(it) },
-                    modifier = Modifier.fillMaxSize()
-                )
-            } else {
-                LazyColumn(
-                    state = listState,
-                    contentPadding = PaddingValues(top = 14.dp, bottom = 16.dp),
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .testTag("messages_list")
-                ) {
-                    // Minimal date timestamp badge
-                    item(key = "date_header") {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 8.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant,
-                                border = androidx.compose.foundation.BorderStroke(
-                                    1.dp,
-                                    MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
-                                )
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        contentPadding = PaddingValues(top = 14.dp, bottom = 16.dp),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .testTag("messages_list")
+                    ) {
+                        // Minimal date timestamp badge
+                        item(key = "date_header") {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Text(
-                                    text = "TODAY, $todayTime",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    letterSpacing = 1.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-                                )
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant,
+                                    border = androidx.compose.foundation.BorderStroke(
+                                        1.dp,
+                                        MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+                                    )
+                                ) {
+                                    Text(
+                                        text = "TODAY, $todayTime",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        letterSpacing = 1.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        items(messages, key = { it.id }) { message ->
+                            ChatMessageBubble(message = message)
+                        }
+
+                        if (isWaitingForReply) {
+                            item(key = "generating_indicator") {
+                                AITypingIndicator()
                             }
                         }
                     }
-
-                    items(messages, key = { it.id }) { message ->
-                        ChatMessageBubble(message = message)
-                    }
-
-                    if (isWaitingForReply) {
-                        item(key = "generating_indicator") {
-                            AITypingIndicator()
-                        }
-                    }
                 }
             }
+        }
+
+        // Blood Red Overlay effect
+        if (uiState.isBloodRedActive) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFF8B0000).copy(alpha = 0.75f))
+            )
+        }
+
+        // White Flash / Blink Overlay effect
+        if (isBlinkWhite) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.White)
+            )
         }
     }
 
@@ -301,9 +373,80 @@ fun UserChatScreen(
             }
         )
     }
+
+    // AI Role Customization Dialog
+    if (uiState.showRoleEditDialog) {
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissRoleEditDialog() },
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            title = {
+                Text(
+                    text = "Customize AI Role",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "Specify the role/persona for the AI assistant in this chat. This is transmitted to the AI in real-time.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(14.dp))
+                    OutlinedTextField(
+                        value = uiState.roleInputText,
+                        onValueChange = { viewModel.onRoleInputChanged(it) },
+                        placeholder = { Text("e.g. Sarcastic Robot, Python Tutor, Pirate Captain...") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        singleLine = true
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "Quick presets:",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf("Nova Assistant", "Python Guru", "Sarcastic AI", "Anime Girl", "Senior Tech Lead").forEach { preset ->
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surface,
+                                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
+                                modifier = Modifier.clickable { viewModel.onRoleInputChanged(preset) }
+                            ) {
+                                Text(
+                                    text = preset,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { viewModel.saveAiRole() },
+                    modifier = Modifier.testTag("save_ai_role_button")
+                ) {
+                    Text(text = "Save Role", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.dismissRoleEditDialog() }) {
+                    Text(text = "Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        )
+    }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun EmptyChatHero(
     onSelectPrompt: (String) -> Unit,
@@ -352,7 +495,6 @@ private fun EmptyChatHero(
 
         Spacer(modifier = Modifier.height(28.dp))
 
-        // Suggested prompt cards in minimal utility style
         val prompts = listOf(
             Triple(Icons.Default.Lightbulb, "Explain quantum physics in simple terms", "Science"),
             Triple(Icons.Default.Psychology, "Brainstorm 5 innovative startup concepts", "Creativity"),
@@ -400,4 +542,3 @@ private fun EmptyChatHero(
         }
     }
 }
-

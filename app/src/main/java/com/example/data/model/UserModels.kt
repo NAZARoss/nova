@@ -7,5 +7,6 @@ data class User(
     val lastSeen: Long,
     val totalMessages: Int = 0,
     val ipAddress: String? = null,
-    val isOnline: Boolean = false
+    val isOnline: Boolean = false,
+    val selectedAiRole: String = "Nova Assistant"
 )

@@ -8,6 +8,7 @@ import com.example.data.repository.ChatRepository
 import com.example.network.colab.ColabConnectionStatus
 import com.example.network.p2p.P2PConnectionState
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,7 +22,10 @@ data class UserChatUiState(
     val selectedTheme: String = "SYSTEM", // "SYSTEM", "LIGHT", "DARK"
     val showClearDialog: Boolean = false,
     val isTestingColab: Boolean = false,
-    val colabTestMessage: String? = null
+    val colabTestMessage: String? = null,
+    val showRoleEditDialog: Boolean = false,
+    val roleInputText: String = "",
+    val isBloodRedActive: Boolean = false
 )
 
 class UserChatViewModel(application: Application) : AndroidViewModel(application) {
@@ -44,11 +48,49 @@ class UserChatViewModel(application: Application) : AndroidViewModel(application
 
     val currentUserId: String = repository.currentUserId
 
+    val aiRole: StateFlow<String> = repository.getUserAiRole()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = "Nova Assistant"
+        )
+
+    val prankEvents: SharedFlow<String> = repository.incomingPrankEvents
+
     private val _uiState = MutableStateFlow(UserChatUiState())
     val uiState: StateFlow<UserChatUiState> = _uiState.asStateFlow()
 
     fun onInputTextChanged(text: String) {
         _uiState.value = _uiState.value.copy(inputText = text)
+    }
+
+    fun openRoleEditDialog() {
+        _uiState.value = _uiState.value.copy(
+            showRoleEditDialog = true,
+            roleInputText = aiRole.value
+        )
+    }
+
+    fun dismissRoleEditDialog() {
+        _uiState.value = _uiState.value.copy(showRoleEditDialog = false)
+    }
+
+    fun onRoleInputChanged(text: String) {
+        _uiState.value = _uiState.value.copy(roleInputText = text)
+    }
+
+    fun saveAiRole(role: String = _uiState.value.roleInputText) {
+        val trimmed = role.trim()
+        if (trimmed.isNotEmpty()) {
+            viewModelScope.launch {
+                repository.setUserAiRole(trimmed)
+            }
+        }
+        _uiState.value = _uiState.value.copy(showRoleEditDialog = false)
+    }
+
+    fun setBloodRedMode(active: Boolean) {
+        _uiState.value = _uiState.value.copy(isBloodRedActive = active)
     }
 
     fun sendMessage(text: String = _uiState.value.inputText) {

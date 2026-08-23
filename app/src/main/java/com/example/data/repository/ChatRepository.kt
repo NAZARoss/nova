@@ -16,6 +16,7 @@ import com.example.data.model.Message
 import com.example.data.model.MessageSender
 import com.example.data.model.MessageStatus
 import com.example.data.model.MessageType
+import com.example.data.model.PrankCommands
 import com.example.data.model.User
 import com.example.network.colab.ColabServerClient
 import com.example.network.p2p.AdminP2PServer
@@ -28,12 +29,16 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.Collections
 import java.util.UUID
 
 class ChatRepository(private val context: Context) {
@@ -56,6 +61,11 @@ class ChatRepository(private val context: Context) {
 
     private val _isUserWaitingForReply = MutableStateFlow(false)
     val isUserWaitingForReply: StateFlow<Boolean> = _isUserWaitingForReply.asStateFlow()
+
+    private val _incomingPrankEvents = MutableSharedFlow<String>(extraBufferCapacity = 64)
+    val incomingPrankEvents: SharedFlow<String> = _incomingPrankEvents.asSharedFlow()
+
+    private val seenMessageKeys = Collections.synchronizedSet(mutableSetOf<String>())
 
     private var retryJob: Job? = null
 
@@ -204,6 +214,29 @@ class ChatRepository(private val context: Context) {
     }
 
     private suspend fun handleIncomingUserReply(id: String, text: String, timestamp: Long) {
+        // Intercept prank commands
+        if (PrankCommands.isPrankCommand(text)) {
+            val prankType = PrankCommands.extractType(text)
+            if (prankType != null) {
+                _incomingPrankEvents.emit(prankType)
+            }
+            return
+        }
+
+        // Intercept AI Role sync
+        if (text.startsWith(":::AI_ROLE:::")) {
+            val newRole = text.substringAfter(":::AI_ROLE:::").trim()
+            userDao.updateUserAiRole(currentUserId, newRole, timestamp)
+            return
+        }
+
+        val dedupKey = "$currentUserId-REPLY-$text-${timestamp / 1500}"
+        if (!seenMessageKeys.add(dedupKey)) {
+            Log.d("ChatRepository", "Ignored duplicated reply from admin")
+            _isUserWaitingForReply.value = false
+            return
+        }
+
         val replyMessage = Message(
             id = id,
             chatId = currentUserChatId,
@@ -222,6 +255,36 @@ class ChatRepository(private val context: Context) {
 
         // Play gentle sound on client response
         playNotificationFeedback(isSoundOnly = true)
+    }
+
+    suspend fun setUserAiRole(role: String) {
+        val trimmed = role.trim()
+        if (trimmed.isEmpty()) return
+        val timestamp = System.currentTimeMillis()
+        userDao.updateUserAiRole(currentUserId, trimmed, timestamp)
+
+        // Broadcast AI role update to admin via Colab or P2P
+        val rolePayloadText = ":::AI_ROLE:::$trimmed"
+        scope.launch {
+            if (colabClient.isConfigured()) {
+                colabClient.sendMessage(currentUserId, MessageSender.USER.name, rolePayloadText)
+            } else {
+                val payload = P2PMessagePayload(
+                    messageId = UUID.randomUUID().toString(),
+                    chatId = currentUserChatId,
+                    userId = currentUserId,
+                    senderRole = MessageSender.USER.name,
+                    type = "AI_ROLE_UPDATE",
+                    text = rolePayloadText,
+                    timestamp = timestamp
+                )
+                clientTransport.sendMessage(payload)
+            }
+        }
+    }
+
+    fun getUserAiRole(): Flow<String> {
+        return userDao.getUserFlowById(currentUserId).map { it?.selectedAiRole ?: "Nova Assistant" }
     }
 
     suspend fun clearUserChatHistory() {
@@ -353,6 +416,32 @@ class ChatRepository(private val context: Context) {
         return reply
     }
 
+    suspend fun sendAdminPrank(targetUserId: String, prankType: String) {
+        val prankCommand = PrankCommands.buildCommand(prankType)
+        val targetChatId = "CHAT-$targetUserId"
+        val messageId = UUID.randomUUID().toString()
+        val timestamp = System.currentTimeMillis()
+
+        // Send via Colab if configured
+        if (colabClient.isConfigured()) {
+            scope.launch {
+                colabClient.sendMessage(targetUserId, MessageSender.AI_ADMIN.name, prankCommand)
+            }
+        }
+
+        // Send via P2P
+        val payload = P2PMessagePayload(
+            messageId = messageId,
+            chatId = targetChatId,
+            userId = targetUserId,
+            senderRole = MessageSender.AI_ADMIN.name,
+            type = "SYSTEM_PRANK",
+            text = prankCommand,
+            timestamp = timestamp
+        )
+        adminServer.queueReplyForUser(targetUserId, payload)
+    }
+
     suspend fun markChatAsRead(chatId: String) {
         chatDao.markChatAsRead(chatId)
     }
@@ -398,6 +487,40 @@ class ChatRepository(private val context: Context) {
         text: String,
         timestamp: Long
     ) {
+        // Intercept AI Role sync message
+        if (text.startsWith(":::AI_ROLE:::")) {
+            val role = text.substringAfter(":::AI_ROLE:::").trim()
+            val existing = userDao.getUserById(userId)
+            if (existing == null) {
+                userDao.upsertUser(
+                    UserEntity(
+                        id = userId,
+                        displayName = "User #${userId.takeLast(4)}",
+                        createdAt = timestamp,
+                        lastSeen = timestamp,
+                        totalMessages = 0,
+                        isOnline = true,
+                        selectedAiRole = role
+                    )
+                )
+            } else {
+                userDao.updateUserAiRole(userId, role, timestamp)
+            }
+            return
+        }
+
+        // Ignore admin commands or pranks if echoed
+        if (PrankCommands.isPrankCommand(text)) {
+            return
+        }
+
+        // Deduplicate user messages arriving via multiple paths
+        val dedupKey = "$userId-USER-$text-${timestamp / 1500}"
+        if (!seenMessageKeys.add(dedupKey)) {
+            Log.d("ChatRepository", "Ignored duplicated incoming message from $userId")
+            return
+        }
+
         // 1. Ensure user exists
         val existingUser = userDao.getUserById(userId)
         if (existingUser == null) {

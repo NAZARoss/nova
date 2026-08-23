@@ -13,7 +13,8 @@ data class UserEntity(
     val lastSeen: Long,
     val totalMessages: Int = 0,
     val ipAddress: String? = null,
-    val isOnline: Boolean = false
+    val isOnline: Boolean = false,
+    val selectedAiRole: String = "Nova Assistant"
 ) {
     fun toDomain(): User {
         return User(
@@ -23,7 +24,8 @@ data class UserEntity(
             lastSeen = lastSeen,
             totalMessages = totalMessages,
             ipAddress = ipAddress,
-            isOnline = isOnline
+            isOnline = isOnline,
+            selectedAiRole = selectedAiRole
         )
     }
 
@@ -36,7 +38,8 @@ data class UserEntity(
                 lastSeen = u.lastSeen,
                 totalMessages = u.totalMessages,
                 ipAddress = u.ipAddress,
-                isOnline = u.isOnline
+                isOnline = u.isOnline,
+                selectedAiRole = u.selectedAiRole
             )
         }
     }

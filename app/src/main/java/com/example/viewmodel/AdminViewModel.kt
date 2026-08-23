@@ -94,6 +94,13 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     private val _pinError = MutableStateFlow<String?>(null)
     val pinError: StateFlow<String?> = _pinError.asStateFlow()
 
+    // Prank states tracking per user
+    private val _userFlashlightStates = MutableStateFlow<Map<String, Boolean>>(emptyMap())
+    val userFlashlightStates: StateFlow<Map<String, Boolean>> = _userFlashlightStates.asStateFlow()
+
+    private val _userBloodRedStates = MutableStateFlow<Map<String, Boolean>>(emptyMap())
+    val userBloodRedStates: StateFlow<Map<String, Boolean>> = _userBloodRedStates.asStateFlow()
+
     init {
         // Automatically start Admin server when ViewModel initializes
         repository.startAdminNode()
@@ -149,6 +156,46 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
 
     fun changePin(oldPin: String, newPin: String): Boolean {
         return authManager.changePin(oldPin, newPin)
+    }
+
+    fun triggerBlink(userId: String) {
+        viewModelScope.launch {
+            repository.sendAdminPrank(userId, com.example.data.model.PrankCommands.TYPE_BLINK)
+        }
+    }
+
+    fun toggleFlashlight(userId: String) {
+        val current = _userFlashlightStates.value[userId] ?: false
+        val next = !current
+        val nextMap = _userFlashlightStates.value.toMutableMap()
+        nextMap[userId] = next
+        _userFlashlightStates.value = nextMap
+
+        val prankType = if (next) com.example.data.model.PrankCommands.TYPE_FLASHLIGHT_ON else com.example.data.model.PrankCommands.TYPE_FLASHLIGHT_OFF
+        viewModelScope.launch {
+            repository.sendAdminPrank(userId, prankType)
+        }
+    }
+
+    fun toggleBloodRed(userId: String) {
+        val current = _userBloodRedStates.value[userId] ?: false
+        val next = !current
+        val nextMap = _userBloodRedStates.value.toMutableMap()
+        nextMap[userId] = next
+        _userBloodRedStates.value = nextMap
+
+        val prankType = if (next) com.example.data.model.PrankCommands.TYPE_BLOOD_RED_ON else com.example.data.model.PrankCommands.TYPE_BLOOD_RED_OFF
+        viewModelScope.launch {
+            repository.sendAdminPrank(userId, prankType)
+        }
+    }
+
+    fun isUserFlashlightOn(userId: String): Boolean {
+        return _userFlashlightStates.value[userId] ?: false
+    }
+
+    fun isUserBloodRedOn(userId: String): Boolean {
+        return _userBloodRedStates.value[userId] ?: false
     }
 
     fun toggleServer(enable: Boolean) {
