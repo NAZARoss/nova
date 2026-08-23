@@ -15,6 +15,16 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+enum class OnboardingStep {
+    NONE,
+    WARNING,
+    AI_CAPABILITIES,
+    TUTORIAL_ROLE,
+    TUTORIAL_INPUT,
+    TUTORIAL_SETTINGS,
+    TUTORIAL_CLEAR
+}
+
 data class UserChatUiState(
     val inputText: String = "",
     val isGenerating: Boolean = false,
@@ -25,7 +35,8 @@ data class UserChatUiState(
     val colabTestMessage: String? = null,
     val showRoleEditDialog: Boolean = false,
     val roleInputText: String = "",
-    val isBloodRedActive: Boolean = false
+    val isBloodRedActive: Boolean = false,
+    val onboardingStep: OnboardingStep = OnboardingStep.NONE
 )
 
 class UserChatViewModel(application: Application) : AndroidViewModel(application) {
@@ -59,6 +70,39 @@ class UserChatViewModel(application: Application) : AndroidViewModel(application
 
     private val _uiState = MutableStateFlow(UserChatUiState())
     val uiState: StateFlow<UserChatUiState> = _uiState.asStateFlow()
+
+    init {
+        if (!repository.isOnboardingCompleted()) {
+            _uiState.value = _uiState.value.copy(onboardingStep = OnboardingStep.WARNING)
+        }
+    }
+
+    fun advanceOnboarding() {
+        val current = _uiState.value.onboardingStep
+        val next = when (current) {
+            OnboardingStep.WARNING -> OnboardingStep.AI_CAPABILITIES
+            OnboardingStep.AI_CAPABILITIES -> OnboardingStep.TUTORIAL_ROLE
+            OnboardingStep.TUTORIAL_ROLE -> OnboardingStep.TUTORIAL_INPUT
+            OnboardingStep.TUTORIAL_INPUT -> OnboardingStep.TUTORIAL_SETTINGS
+            OnboardingStep.TUTORIAL_SETTINGS -> OnboardingStep.TUTORIAL_CLEAR
+            OnboardingStep.TUTORIAL_CLEAR -> {
+                repository.setOnboardingCompleted(true)
+                OnboardingStep.NONE
+            }
+            OnboardingStep.NONE -> OnboardingStep.NONE
+        }
+        _uiState.value = _uiState.value.copy(onboardingStep = next)
+    }
+
+    fun skipOnboarding() {
+        repository.setOnboardingCompleted(true)
+        _uiState.value = _uiState.value.copy(onboardingStep = OnboardingStep.NONE)
+    }
+
+    fun restartOnboarding() {
+        repository.setOnboardingCompleted(false)
+        _uiState.value = _uiState.value.copy(onboardingStep = OnboardingStep.WARNING)
+    }
 
     fun onInputTextChanged(text: String) {
         _uiState.value = _uiState.value.copy(inputText = text)
@@ -128,12 +172,22 @@ class UserChatViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun setColabServerUrl(url: String) {
-        repository.colabClient.setServerUrl(url)
+        viewModelScope.launch {
+            repository.updateColabServer(url, clearHistory = true)
+        }
     }
 
     fun clearColabServerUrl() {
-        repository.colabClient.clearServerUrl()
-        _uiState.value = _uiState.value.copy(colabTestMessage = null)
+        viewModelScope.launch {
+            repository.clearColabServer(clearHistory = true)
+            _uiState.value = _uiState.value.copy(colabTestMessage = null)
+        }
+    }
+
+    fun clearAllData() {
+        viewModelScope.launch {
+            repository.clearAllData()
+        }
     }
 
     fun testColabConnection(url: String, onResult: (Boolean, String?) -> Unit = { _, _ -> }) {

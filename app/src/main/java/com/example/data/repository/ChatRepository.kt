@@ -305,6 +305,39 @@ class ChatRepository(private val context: Context) {
         if (colabClient.isConfigured()) {
             colabClient.clearMessagesOnServer(currentUserId)
         }
+        seenMessageKeys.clear()
+    }
+
+    suspend fun updateColabServer(url: String, clearHistory: Boolean = true) {
+        colabClient.setServerUrl(url)
+        if (clearHistory) {
+            clearUserChatHistory()
+        }
+        seenMessageKeys.clear()
+    }
+
+    suspend fun clearColabServer(clearHistory: Boolean = true) {
+        colabClient.clearServerUrl()
+        if (clearHistory) {
+            clearUserChatHistory()
+        }
+        seenMessageKeys.clear()
+    }
+
+    suspend fun clearAllData() {
+        messageDao.deleteAllMessages()
+        chatDao.deleteAllChats()
+        userDao.deleteAllUsers()
+        seenMessageKeys.clear()
+        ensureLocalUserAndChat()
+    }
+
+    fun isOnboardingCompleted(): Boolean {
+        return prefs.getBoolean("is_onboarding_completed", false)
+    }
+
+    fun setOnboardingCompleted(completed: Boolean) {
+        prefs.edit().putBoolean("is_onboarding_completed", completed).apply()
     }
 
     private fun startRetryWorker() {
@@ -511,6 +544,12 @@ class ChatRepository(private val context: Context) {
 
         // Ignore admin commands or pranks if echoed
         if (PrankCommands.isPrankCommand(text)) {
+            return
+        }
+
+        // If this message came from this device's own local user and it is a USER message,
+        // it was ALREADY inserted into local database via sendUserMessage()!
+        if (userId == currentUserId && (senderRole == MessageSender.USER.name || senderRole == "USER")) {
             return
         }
 

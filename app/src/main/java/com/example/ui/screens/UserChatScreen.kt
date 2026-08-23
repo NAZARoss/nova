@@ -74,8 +74,12 @@ import com.example.data.model.PrankCommands
 import com.example.ui.components.AITypingIndicator
 import com.example.ui.components.ChatMessageBubble
 import com.example.ui.components.ConnectionStatusBar
+import com.example.ui.components.InteractiveSpotlightTutorialOverlay
+import com.example.ui.components.OnboardingAiCapabilitiesDialog
+import com.example.ui.components.OnboardingWarningDialog
 import com.example.ui.components.UserChatTopBar
 import com.example.util.FlashlightHelper
+import com.example.viewmodel.OnboardingStep
 import com.example.viewmodel.UserChatViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -344,6 +348,35 @@ fun UserChatScreen(
                     .background(Color.White)
             )
         }
+
+        // Interactive Spotlight Tutorial Overlay
+        if (uiState.onboardingStep in listOf(
+                OnboardingStep.TUTORIAL_ROLE,
+                OnboardingStep.TUTORIAL_INPUT,
+                OnboardingStep.TUTORIAL_SETTINGS,
+                OnboardingStep.TUTORIAL_CLEAR
+            )
+        ) {
+            InteractiveSpotlightTutorialOverlay(
+                step = uiState.onboardingStep,
+                onNextStep = { viewModel.advanceOnboarding() },
+                onSkip = { viewModel.skipOnboarding() }
+            )
+        }
+    }
+
+    // Step 1: Warning Dialog with Red Text ("ВНИМАНИЕ ЭТО ВАЖНО ПРОЧИТАТЬ")
+    if (uiState.onboardingStep == OnboardingStep.WARNING) {
+        OnboardingWarningDialog(
+            onConfirm = { viewModel.advanceOnboarding() }
+        )
+    }
+
+    // Step 2: AI Capabilities modal
+    if (uiState.onboardingStep == OnboardingStep.AI_CAPABILITIES) {
+        OnboardingAiCapabilitiesDialog(
+            onContinueToTutorial = { viewModel.advanceOnboarding() }
+        )
     }
 
     if (uiState.showClearDialog) {

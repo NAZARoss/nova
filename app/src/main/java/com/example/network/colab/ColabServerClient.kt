@@ -91,15 +91,17 @@ class ColabServerClient(private val context: Context) {
         _serverUrl.value = cleaned
         prefs.edit().putString(KEY_SERVER_URL, cleaned).apply()
 
+        stopUserPolling()
+        stopAdminPolling()
+
         if (cleaned.isBlank()) {
             _connectionStatus.value = ColabConnectionStatus.NOT_CONFIGURED
-            stopUserPolling()
-            stopAdminPolling()
         } else {
             _connectionStatus.value = ColabConnectionStatus.CONNECTING
             checkConnection()
-            // Restart polling if was active
+            // Restart polling with fresh state
             currentPollingUserId?.let { startUserPolling(it) }
+            startAdminPolling()
         }
     }
 
