@@ -86,6 +86,8 @@ fun UserChatScreen(
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val isWaitingForReply by viewModel.isWaitingForReply.collectAsStateWithLifecycle()
     val connectionState by viewModel.connectionState.collectAsStateWithLifecycle()
+    val colabServerUrl by viewModel.colabServerUrl.collectAsStateWithLifecycle()
+    val colabStatus by viewModel.colabConnectionStatus.collectAsStateWithLifecycle()
 
     val listState = rememberLazyListState()
 
@@ -105,9 +107,13 @@ fun UserChatScreen(
             Column {
                 UserChatTopBar(
                     onClearChatClick = { viewModel.openClearDialog() },
-                    onSettingsClick = onNavigateToSettings
+                    onSettingsClick = onNavigateToSettings,
+                    isColabConfigured = colabServerUrl.isNotBlank(),
+                    colabStatus = colabStatus
                 )
-                ConnectionStatusBar(connectionState = connectionState)
+                if (colabServerUrl.isBlank()) {
+                    ConnectionStatusBar(connectionState = connectionState)
+                }
             }
         },
         bottomBar = {

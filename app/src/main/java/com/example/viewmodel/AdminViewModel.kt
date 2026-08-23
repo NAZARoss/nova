@@ -31,6 +31,9 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     val isServerRunning: StateFlow<Boolean> = repository.adminServer.isRunning
     val connectedClients: StateFlow<Map<String, String>> = repository.adminServer.connectedUserIps
 
+    val colabServerUrl: StateFlow<String> = repository.colabClient.serverUrl
+    val colabConnectionStatus: StateFlow<com.example.network.colab.ColabConnectionStatus> = repository.colabClient.connectionStatus
+
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
@@ -158,5 +161,17 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
 
     fun getLocalIp(): String {
         return repository.p2pDiscovery.getLocalIpAddress() ?: "127.0.0.1"
+    }
+
+    fun setColabServerUrl(url: String) {
+        repository.colabClient.setServerUrl(url)
+    }
+
+    fun clearColabServerUrl() {
+        repository.colabClient.clearServerUrl()
+    }
+
+    suspend fun testColabConnection(url: String): Pair<Boolean, String?> {
+        return repository.colabClient.testConnection(url)
     }
 }

@@ -33,13 +33,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
+import com.example.network.colab.ColabConnectionStatus
 import com.example.ui.theme.StatusActiveGreen
+import com.example.ui.theme.StatusError
+import com.example.ui.theme.StatusWaiting
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UserChatTopBar(
     onClearChatClick: () -> Unit,
     onSettingsClick: () -> Unit,
+    isColabConfigured: Boolean = false,
+    colabStatus: ColabConnectionStatus = ColabConnectionStatus.NOT_CONFIGURED,
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -85,15 +90,37 @@ fun UserChatTopBar(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(top = 1.dp)
                     ) {
+                        val statusDotColor = if (isColabConfigured) {
+                            when (colabStatus) {
+                                ColabConnectionStatus.CONNECTED -> StatusActiveGreen
+                                ColabConnectionStatus.CONNECTING -> StatusWaiting
+                                ColabConnectionStatus.ERROR -> StatusError
+                                ColabConnectionStatus.NOT_CONFIGURED -> MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        } else {
+                            StatusActiveGreen
+                        }
+
+                        val statusLabel = if (isColabConfigured) {
+                            when (colabStatus) {
+                                ColabConnectionStatus.CONNECTED -> "COLAB CLOUD ONLINE"
+                                ColabConnectionStatus.CONNECTING -> "CONNECTING TO COLAB..."
+                                ColabConnectionStatus.ERROR -> "COLAB SERVER ERROR"
+                                ColabConnectionStatus.NOT_CONFIGURED -> "DIRECT LINK ACTIVE"
+                            }
+                        } else {
+                            "DIRECT P2P ACTIVE"
+                        }
+
                         Box(
                             modifier = Modifier
                                 .size(6.dp)
                                 .clip(CircleShape)
-                                .background(StatusActiveGreen)
+                                .background(statusDotColor)
                         )
                         Spacer(modifier = Modifier.width(5.dp))
                         Text(
-                            text = "DIRECT LINK ACTIVE",
+                            text = statusLabel,
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 0.8.sp,

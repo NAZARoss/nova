@@ -17,6 +17,7 @@ import com.example.data.model.MessageSender
 import com.example.data.model.MessageStatus
 import com.example.data.model.MessageType
 import com.example.data.model.User
+import com.example.network.colab.ColabServerClient
 import com.example.network.p2p.AdminP2PServer
 import com.example.network.p2p.ClientP2PTransport
 import com.example.network.p2p.P2PConnectionState
@@ -48,6 +49,7 @@ class ChatRepository(private val context: Context) {
     val p2pDiscovery = P2PDiscovery(context)
     val adminServer = AdminP2PServer(port = 8888)
     val clientTransport = ClientP2PTransport(context, p2pDiscovery)
+    val colabClient = ColabServerClient(context)
 
     val currentUserId: String = getOrCreateUserId()
     val currentUserChatId: String = "CHAT-$currentUserId"
@@ -58,11 +60,16 @@ class ChatRepository(private val context: Context) {
     private var retryJob: Job? = null
 
     init {
-        // Initialize client node
+        // Initialize client node & Colab polling
         clientTransport.initialize(currentUserId)
+        colabClient.startUserPolling(currentUserId)
+        colabClient.startAdminPolling()
+
         ensureLocalUserAndChat()
         listenForIncomingRepliesToUser()
         listenForIncomingMessagesToAdmin()
+        listenForColabRepliesToUser()
+        listenForColabIncomingMessagesToAdmin()
         startRetryWorker()
     }
 
@@ -141,19 +148,23 @@ class ChatRepository(private val context: Context) {
         chatDao.recordIncomingUserMessage(currentUserChatId, text, timestamp)
         _isUserWaitingForReply.value = true
 
-        // 2. Transmit via P2P
-        val payload = P2PMessagePayload(
-            messageId = messageId,
-            chatId = currentUserChatId,
-            userId = currentUserId,
-            senderRole = MessageSender.USER.name,
-            type = MessageType.USER_MESSAGE.name,
-            text = text,
-            timestamp = timestamp
-        )
-
+        // 2. Transmit via Colab Server or P2P
         scope.launch {
-            val delivered = clientTransport.sendMessage(payload)
+            val delivered = if (colabClient.isConfigured()) {
+                colabClient.sendMessage(currentUserId, MessageSender.USER.name, text)
+            } else {
+                val payload = P2PMessagePayload(
+                    messageId = messageId,
+                    chatId = currentUserChatId,
+                    userId = currentUserId,
+                    senderRole = MessageSender.USER.name,
+                    type = MessageType.USER_MESSAGE.name,
+                    text = text,
+                    timestamp = timestamp
+                )
+                clientTransport.sendMessage(payload)
+            }
+
             if (delivered) {
                 messageDao.updateDeliveryStatus(messageId, MessageStatus.DELIVERED.name, true)
             } else {
@@ -168,27 +179,49 @@ class ChatRepository(private val context: Context) {
         scope.launch {
             clientTransport.incomingReplies.collect { replyPayload ->
                 if (replyPayload.userId == currentUserId) {
-                    val replyMessage = Message(
+                    handleIncomingUserReply(
                         id = replyPayload.messageId,
-                        chatId = currentUserChatId,
-                        userId = currentUserId,
-                        sender = MessageSender.AI_ADMIN,
-                        type = MessageType.ADMIN_REPLY,
                         text = replyPayload.text,
-                        timestamp = replyPayload.timestamp,
-                        status = MessageStatus.ANSWERED,
-                        isDeliveredToAdmin = true
+                        timestamp = replyPayload.timestamp
                     )
-
-                    messageDao.insertOrUpdate(MessageEntity.fromDomain(replyMessage))
-                    chatDao.recordAdminReply(currentUserChatId, replyPayload.text, replyPayload.timestamp)
-                    _isUserWaitingForReply.value = false
-
-                    // Play gentle sound on client response
-                    playNotificationFeedback(isSoundOnly = true)
                 }
             }
         }
+    }
+
+    private fun listenForColabRepliesToUser() {
+        scope.launch {
+            colabClient.incomingUserReplies.collect { item ->
+                if (item.userId == currentUserId) {
+                    handleIncomingUserReply(
+                        id = "COLAB-${item.id}-${item.timestamp}",
+                        text = item.text,
+                        timestamp = item.timestamp
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun handleIncomingUserReply(id: String, text: String, timestamp: Long) {
+        val replyMessage = Message(
+            id = id,
+            chatId = currentUserChatId,
+            userId = currentUserId,
+            sender = MessageSender.AI_ADMIN,
+            type = MessageType.ADMIN_REPLY,
+            text = text,
+            timestamp = timestamp,
+            status = MessageStatus.ANSWERED,
+            isDeliveredToAdmin = true
+        )
+
+        messageDao.insertOrUpdate(MessageEntity.fromDomain(replyMessage))
+        chatDao.recordAdminReply(currentUserChatId, text, timestamp)
+        _isUserWaitingForReply.value = false
+
+        // Play gentle sound on client response
+        playNotificationFeedback(isSoundOnly = true)
     }
 
     suspend fun clearUserChatHistory() {
@@ -205,6 +238,10 @@ class ChatRepository(private val context: Context) {
             )
         )
         _isUserWaitingForReply.value = false
+
+        if (colabClient.isConfigured()) {
+            colabClient.clearMessagesOnServer(currentUserId)
+        }
     }
 
     private fun startRetryWorker() {
@@ -216,16 +253,20 @@ class ChatRepository(private val context: Context) {
                     val undelivered = messageDao.getUndeliveredMessages()
                     for (entity in undelivered) {
                         if (entity.sender == MessageSender.USER.name) {
-                            val payload = P2PMessagePayload(
-                                messageId = entity.id,
-                                chatId = entity.chatId,
-                                userId = entity.userId,
-                                senderRole = entity.sender,
-                                type = entity.type,
-                                text = entity.text,
-                                timestamp = entity.timestamp
-                            )
-                            val sent = clientTransport.sendMessage(payload)
+                            val sent = if (colabClient.isConfigured()) {
+                                colabClient.sendMessage(entity.userId, MessageSender.USER.name, entity.text)
+                            } else {
+                                val payload = P2PMessagePayload(
+                                    messageId = entity.id,
+                                    chatId = entity.chatId,
+                                    userId = entity.userId,
+                                    senderRole = entity.sender,
+                                    type = entity.type,
+                                    text = entity.text,
+                                    timestamp = entity.timestamp
+                                )
+                                clientTransport.sendMessage(payload)
+                            }
                             if (sent) {
                                 messageDao.updateDeliveryStatus(entity.id, MessageStatus.DELIVERED.name, true)
                             }
@@ -290,7 +331,14 @@ class ChatRepository(private val context: Context) {
         messageDao.insertOrUpdate(MessageEntity.fromDomain(reply))
         chatDao.recordAdminReply(targetChatId, text, timestamp)
 
-        // 2. Queue and push to user via P2P server
+        // 2. Transmit via Colab Server if configured
+        if (colabClient.isConfigured()) {
+            scope.launch {
+                colabClient.sendMessage(targetUserId, MessageSender.AI_ADMIN.name, text)
+            }
+        }
+
+        // 3. Queue and push to user via P2P server
         val payload = P2PMessagePayload(
             messageId = messageId,
             chatId = targetChatId,
@@ -312,64 +360,96 @@ class ChatRepository(private val context: Context) {
     private fun listenForIncomingMessagesToAdmin() {
         scope.launch {
             adminServer.incomingMessages.collect { incoming ->
-                val timestamp = incoming.timestamp
-                val userId = incoming.userId
-                val chatId = incoming.chatId
-
-                // 1. Ensure user exists
-                val existingUser = userDao.getUserById(userId)
-                if (existingUser == null) {
-                    userDao.upsertUser(
-                        UserEntity(
-                            id = userId,
-                            displayName = "User #${userId.takeLast(4)}",
-                            createdAt = timestamp,
-                            lastSeen = timestamp,
-                            totalMessages = 1,
-                            isOnline = true
-                        )
-                    )
-                } else {
-                    userDao.incrementUserMessages(userId, timestamp)
-                    userDao.updateUserOnlineStatus(userId, true, timestamp)
-                }
-
-                // 2. Insert message into Room (deduplicated by PrimaryKey messageId)
-                val msgEntity = MessageEntity(
-                    id = incoming.messageId,
-                    chatId = chatId,
-                    userId = userId,
-                    sender = incoming.senderRole,
+                handleIncomingMessageToAdmin(
+                    messageId = incoming.messageId,
+                    chatId = incoming.chatId,
+                    userId = incoming.userId,
+                    senderRole = incoming.senderRole,
                     type = incoming.type,
                     text = incoming.text,
-                    timestamp = timestamp,
-                    status = MessageStatus.DELIVERED.name,
-                    isDeliveredToAdmin = true
+                    timestamp = incoming.timestamp
                 )
-                messageDao.insertOrUpdate(msgEntity)
-
-                // 3. Update Chat row
-                val existingChat = chatDao.getChatById(chatId)
-                if (existingChat == null) {
-                    chatDao.upsertChat(
-                        ChatEntity(
-                            id = chatId,
-                            userId = userId,
-                            title = "User #${userId.takeLast(4)}",
-                            lastMessage = incoming.text,
-                            lastActivity = timestamp,
-                            unreadCount = 1,
-                            isWaitingForReply = true
-                        )
-                    )
-                } else {
-                    chatDao.recordIncomingUserMessage(chatId, incoming.text, timestamp)
-                }
-
-                // 4. Admin alert notification
-                playNotificationFeedback(isSoundOnly = false)
             }
         }
+    }
+
+    private fun listenForColabIncomingMessagesToAdmin() {
+        scope.launch {
+            colabClient.incomingAdminMessages.collect { item ->
+                handleIncomingMessageToAdmin(
+                    messageId = "COLAB-${item.id}-${item.timestamp}",
+                    chatId = "CHAT-${item.userId}",
+                    userId = item.userId,
+                    senderRole = item.sender,
+                    type = MessageType.USER_MESSAGE.name,
+                    text = item.text,
+                    timestamp = item.timestamp
+                )
+            }
+        }
+    }
+
+    private suspend fun handleIncomingMessageToAdmin(
+        messageId: String,
+        chatId: String,
+        userId: String,
+        senderRole: String,
+        type: String,
+        text: String,
+        timestamp: Long
+    ) {
+        // 1. Ensure user exists
+        val existingUser = userDao.getUserById(userId)
+        if (existingUser == null) {
+            userDao.upsertUser(
+                UserEntity(
+                    id = userId,
+                    displayName = "User #${userId.takeLast(4)}",
+                    createdAt = timestamp,
+                    lastSeen = timestamp,
+                    totalMessages = 1,
+                    isOnline = true
+                )
+            )
+        } else {
+            userDao.incrementUserMessages(userId, timestamp)
+            userDao.updateUserOnlineStatus(userId, true, timestamp)
+        }
+
+        // 2. Insert message into Room (deduplicated by PrimaryKey messageId)
+        val msgEntity = MessageEntity(
+            id = messageId,
+            chatId = chatId,
+            userId = userId,
+            sender = senderRole,
+            type = type,
+            text = text,
+            timestamp = timestamp,
+            status = MessageStatus.DELIVERED.name,
+            isDeliveredToAdmin = true
+        )
+        messageDao.insertOrUpdate(msgEntity)
+
+        // 3. Update Chat row
+        val existingChat = chatDao.getChatById(chatId)
+        if (existingChat == null) {
+            chatDao.upsertChat(
+                ChatEntity(
+                    id = chatId,
+                    userId = userId,
+                    title = "User #${userId.takeLast(4)}",
+                    lastMessage = text,
+                    lastActivity = timestamp,
+                    unreadCount = 1,
+                    isWaitingForReply = true
+                )
+            )
+        } else {
+            chatDao.recordIncomingUserMessage(chatId, text, timestamp)
+        }
+
+        // 4. Admin alert notification
+        playNotificationFeedback(isSoundOnly = false)
     }
 
     private fun playNotificationFeedback(isSoundOnly: Boolean) {

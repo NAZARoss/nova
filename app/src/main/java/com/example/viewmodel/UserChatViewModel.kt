@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.model.Message
 import com.example.data.repository.ChatRepository
+import com.example.network.colab.ColabConnectionStatus
 import com.example.network.p2p.P2PConnectionState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -18,7 +19,9 @@ data class UserChatUiState(
     val isGenerating: Boolean = false,
     val connectionState: P2PConnectionState = P2PConnectionState.SEARCHING,
     val selectedTheme: String = "SYSTEM", // "SYSTEM", "LIGHT", "DARK"
-    val showClearDialog: Boolean = false
+    val showClearDialog: Boolean = false,
+    val isTestingColab: Boolean = false,
+    val colabTestMessage: String? = null
 )
 
 class UserChatViewModel(application: Application) : AndroidViewModel(application) {
@@ -35,6 +38,9 @@ class UserChatViewModel(application: Application) : AndroidViewModel(application
     val isWaitingForReply: StateFlow<Boolean> = repository.isUserWaitingForReply
 
     val connectionState: StateFlow<P2PConnectionState> = repository.clientTransport.connectionState
+
+    val colabServerUrl: StateFlow<String> = repository.colabClient.serverUrl
+    val colabConnectionStatus: StateFlow<ColabConnectionStatus> = repository.colabClient.connectionStatus
 
     val currentUserId: String = repository.currentUserId
 
@@ -77,5 +83,27 @@ class UserChatViewModel(application: Application) : AndroidViewModel(application
 
     fun setTheme(theme: String) {
         _uiState.value = _uiState.value.copy(selectedTheme = theme)
+    }
+
+    fun setColabServerUrl(url: String) {
+        repository.colabClient.setServerUrl(url)
+    }
+
+    fun clearColabServerUrl() {
+        repository.colabClient.clearServerUrl()
+        _uiState.value = _uiState.value.copy(colabTestMessage = null)
+    }
+
+    fun testColabConnection(url: String, onResult: (Boolean, String?) -> Unit = { _, _ -> }) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isTestingColab = true, colabTestMessage = null)
+            val (success, errorMsg) = repository.colabClient.testConnection(url)
+            val message = if (success) "Connected successfully to Colab server!" else "Connection failed: $errorMsg"
+            _uiState.value = _uiState.value.copy(
+                isTestingColab = false,
+                colabTestMessage = message
+            )
+            onResult(success, errorMsg)
+        }
     }
 }

@@ -91,6 +91,8 @@ fun AdminDashboardScreen(
     val waitingReplies by adminViewModel.waitingReplyCount.collectAsStateWithLifecycle()
     val searchQuery by adminViewModel.searchQuery.collectAsStateWithLifecycle()
     val isServerRunning by adminViewModel.isServerRunning.collectAsStateWithLifecycle()
+    val colabUrl by adminViewModel.colabServerUrl.collectAsStateWithLifecycle()
+    val colabStatus by adminViewModel.colabConnectionStatus.collectAsStateWithLifecycle()
 
     var selectedTab by remember { mutableIntStateOf(0) } // 0 = Chats, 1 = Users, 2 = Notifications/Feed
 
@@ -107,15 +109,30 @@ fun AdminDashboardScreen(
                                 color = MaterialTheme.colorScheme.primary
                             )
                             Spacer(modifier = Modifier.width(8.dp))
+                            val isConnected = if (colabUrl.isNotBlank()) {
+                                colabStatus == com.example.network.colab.ColabConnectionStatus.CONNECTED
+                            } else {
+                                isServerRunning
+                            }
                             Box(
                                 modifier = Modifier
                                     .size(8.dp)
                                     .clip(CircleShape)
-                                    .background(if (isServerRunning) StatusOnline else StatusError)
+                                    .background(if (isConnected) StatusOnline else StatusError)
                             )
                         }
+                        val subtitle = if (colabUrl.isNotBlank()) {
+                            when (colabStatus) {
+                                com.example.network.colab.ColabConnectionStatus.CONNECTED -> "Colab Server Connected (Cloud)"
+                                com.example.network.colab.ColabConnectionStatus.CONNECTING -> "Connecting to Colab..."
+                                com.example.network.colab.ColabConnectionStatus.ERROR -> "Colab Server Error"
+                                com.example.network.colab.ColabConnectionStatus.NOT_CONFIGURED -> "P2P Mode Active"
+                            }
+                        } else {
+                            if (isServerRunning) "P2P Node Active • Port 8888" else "Server Stopped"
+                        }
                         Text(
-                            text = if (isServerRunning) "P2P Node Active • Port 8888" else "Server Stopped",
+                            text = subtitle,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                         )
