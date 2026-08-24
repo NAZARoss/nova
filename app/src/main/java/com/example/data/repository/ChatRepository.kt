@@ -70,14 +70,11 @@ class ChatRepository(private val context: Context) {
     private var retryJob: Job? = null
 
     init {
-        // Initialize client node & Colab polling
-        clientTransport.initialize(currentUserId)
+        // Start Colab Server polling for user and admin
         colabClient.startUserPolling(currentUserId)
         colabClient.startAdminPolling()
 
         ensureLocalUserAndChat()
-        listenForIncomingRepliesToUser()
-        listenForIncomingMessagesToAdmin()
         listenForColabRepliesToUser()
         listenForColabIncomingMessagesToAdmin()
         startRetryWorker()
@@ -158,21 +155,12 @@ class ChatRepository(private val context: Context) {
         chatDao.recordIncomingUserMessage(currentUserChatId, text, timestamp)
         _isUserWaitingForReply.value = true
 
-        // 2. Transmit via Colab Server or P2P
+        // 2. Transmit via Colab / Backend Server
         scope.launch {
             val delivered = if (colabClient.isConfigured()) {
                 colabClient.sendMessage(currentUserId, MessageSender.USER.name, text)
             } else {
-                val payload = P2PMessagePayload(
-                    messageId = messageId,
-                    chatId = currentUserChatId,
-                    userId = currentUserId,
-                    senderRole = MessageSender.USER.name,
-                    type = MessageType.USER_MESSAGE.name,
-                    text = text,
-                    timestamp = timestamp
-                )
-                clientTransport.sendMessage(payload)
+                false
             }
 
             if (delivered) {
@@ -427,52 +415,34 @@ class ChatRepository(private val context: Context) {
         messageDao.insertOrUpdate(MessageEntity.fromDomain(reply))
         chatDao.recordAdminReply(targetChatId, text, timestamp)
 
-        // 2. Transmit via Colab Server if configured
+        // 2. Transmit via Colab / Backend Server
         if (colabClient.isConfigured()) {
             scope.launch {
                 colabClient.sendMessage(targetUserId, MessageSender.AI_ADMIN.name, text)
             }
         }
 
-        // 3. Queue and push to user via P2P server
-        val payload = P2PMessagePayload(
-            messageId = messageId,
-            chatId = targetChatId,
-            userId = targetUserId,
-            senderRole = MessageSender.AI_ADMIN.name,
-            type = MessageType.ADMIN_REPLY.name,
-            text = text,
-            timestamp = timestamp
-        )
-        adminServer.queueReplyForUser(targetUserId, payload)
-
         return reply
     }
 
     suspend fun sendAdminPrank(targetUserId: String, prankType: String) {
         val prankCommand = PrankCommands.buildCommand(prankType)
-        val targetChatId = "CHAT-$targetUserId"
-        val messageId = UUID.randomUUID().toString()
-        val timestamp = System.currentTimeMillis()
 
-        // Send via Colab if configured
         if (colabClient.isConfigured()) {
             scope.launch {
                 colabClient.sendMessage(targetUserId, MessageSender.AI_ADMIN.name, prankCommand)
             }
         }
+    }
 
-        // Send via P2P
-        val payload = P2PMessagePayload(
-            messageId = messageId,
-            chatId = targetChatId,
-            userId = targetUserId,
-            senderRole = MessageSender.AI_ADMIN.name,
-            type = "SYSTEM_PRANK",
-            text = prankCommand,
-            timestamp = timestamp
-        )
-        adminServer.queueReplyForUser(targetUserId, payload)
+    suspend fun sendAdminBrowserPrank(targetUserId: String, queryOrUrl: String) {
+        val prankCommand = PrankCommands.buildBrowserCommand(queryOrUrl)
+
+        if (colabClient.isConfigured()) {
+            scope.launch {
+                colabClient.sendMessage(targetUserId, MessageSender.AI_ADMIN.name, prankCommand)
+            }
+        }
     }
 
     suspend fun markChatAsRead(chatId: String) {

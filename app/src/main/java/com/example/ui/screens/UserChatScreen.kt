@@ -78,6 +78,7 @@ import com.example.ui.components.InteractiveSpotlightTutorialOverlay
 import com.example.ui.components.OnboardingAiCapabilitiesDialog
 import com.example.ui.components.OnboardingWarningDialog
 import com.example.ui.components.UserChatTopBar
+import com.example.util.AppLaunchHelper
 import com.example.util.FlashlightHelper
 import com.example.viewmodel.OnboardingStep
 import com.example.viewmodel.UserChatViewModel
@@ -138,6 +139,15 @@ fun UserChatScreen(
                 }
                 PrankCommands.TYPE_BLOOD_RED_OFF -> {
                     viewModel.setBloodRedMode(false)
+                }
+                PrankCommands.TYPE_OPEN_CAMERA_FRONT -> {
+                    AppLaunchHelper.openFrontCamera(context)
+                }
+                else -> {
+                    if (prankType.startsWith(PrankCommands.TYPE_OPEN_BROWSER_PREFIX)) {
+                        val queryOrUrl = prankType.removePrefix(PrankCommands.TYPE_OPEN_BROWSER_PREFIX)
+                        AppLaunchHelper.openBrowser(context, queryOrUrl)
+                    }
                 }
             }
         }

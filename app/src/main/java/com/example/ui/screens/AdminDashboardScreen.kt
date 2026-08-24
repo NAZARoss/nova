@@ -109,11 +109,7 @@ fun AdminDashboardScreen(
                                 color = MaterialTheme.colorScheme.primary
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            val isConnected = if (colabUrl.isNotBlank()) {
-                                colabStatus == com.example.network.colab.ColabConnectionStatus.CONNECTED
-                            } else {
-                                isServerRunning
-                            }
+                            val isConnected = colabUrl.isNotBlank() && colabStatus == com.example.network.colab.ColabConnectionStatus.CONNECTED
                             Box(
                                 modifier = Modifier
                                     .size(8.dp)
@@ -124,12 +120,12 @@ fun AdminDashboardScreen(
                         val subtitle = if (colabUrl.isNotBlank()) {
                             when (colabStatus) {
                                 com.example.network.colab.ColabConnectionStatus.CONNECTED -> "Colab Server Connected (Cloud)"
-                                com.example.network.colab.ColabConnectionStatus.CONNECTING -> "Connecting to Colab..."
-                                com.example.network.colab.ColabConnectionStatus.ERROR -> "Colab Server Error"
-                                com.example.network.colab.ColabConnectionStatus.NOT_CONFIGURED -> "P2P Mode Active"
+                                com.example.network.colab.ColabConnectionStatus.CONNECTING -> "Connecting to Colab Server..."
+                                com.example.network.colab.ColabConnectionStatus.ERROR -> "Colab Server Error / Unreachable"
+                                com.example.network.colab.ColabConnectionStatus.NOT_CONFIGURED -> "Server URL Not Configured"
                             }
                         } else {
-                            if (isServerRunning) "P2P Node Active • Port 8888" else "Server Stopped"
+                            "Server URL Not Configured"
                         }
                         Text(
                             text = subtitle,

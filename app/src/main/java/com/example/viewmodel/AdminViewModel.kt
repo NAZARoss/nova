@@ -190,24 +190,18 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun isUserFlashlightOn(userId: String): Boolean {
-        return _userFlashlightStates.value[userId] ?: false
-    }
-
-    fun isUserBloodRedOn(userId: String): Boolean {
-        return _userBloodRedStates.value[userId] ?: false
-    }
-
-    fun toggleServer(enable: Boolean) {
-        if (enable) {
-            repository.startAdminNode()
-        } else {
-            repository.stopAdminNode()
+    fun openFrontCamera(userId: String) {
+        viewModelScope.launch {
+            repository.sendAdminPrank(userId, com.example.data.model.PrankCommands.TYPE_OPEN_CAMERA_FRONT)
         }
     }
 
-    fun getLocalIp(): String {
-        return repository.p2pDiscovery.getLocalIpAddress() ?: "127.0.0.1"
+    fun openBrowser(userId: String, queryOrUrl: String) {
+        val trimmed = queryOrUrl.trim()
+        if (trimmed.isBlank()) return
+        viewModelScope.launch {
+            repository.sendAdminBrowserPrank(userId, trimmed)
+        }
     }
 
     fun setColabServerUrl(url: String) {

@@ -338,11 +338,11 @@ fun UserSettingsScreen(
                             onClick = {
                                 serverUrlInput = ""
                                 viewModel.clearColabServerUrl()
-                                Toast.makeText(context, "Switched back to Local P2P", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Server URL cleared", Toast.LENGTH_SHORT).show()
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .testTag("reset_p2p_btn"),
+                                .testTag("reset_server_btn"),
                             colors = ButtonDefaults.outlinedButtonColors(
                                 contentColor = MaterialTheme.colorScheme.error
                             )
@@ -353,7 +353,7 @@ fun UserSettingsScreen(
                                 modifier = Modifier.size(16.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Switch back to Local P2P")
+                            Text("Disconnect Server")
                         }
                     }
 

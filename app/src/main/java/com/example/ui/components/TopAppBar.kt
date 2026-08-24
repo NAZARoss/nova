@@ -120,21 +120,21 @@ fun UserChatTopBar(
                                 ColabConnectionStatus.CONNECTED -> StatusActiveGreen
                                 ColabConnectionStatus.CONNECTING -> StatusWaiting
                                 ColabConnectionStatus.ERROR -> StatusError
-                                ColabConnectionStatus.NOT_CONFIGURED -> MaterialTheme.colorScheme.onSurfaceVariant
+                                ColabConnectionStatus.NOT_CONFIGURED -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                             }
                         } else {
-                            StatusActiveGreen
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                         }
 
                         val statusLabel = if (isColabConfigured) {
                             when (colabStatus) {
-                                ColabConnectionStatus.CONNECTED -> "COLAB CLOUD ONLINE"
-                                ColabConnectionStatus.CONNECTING -> "CONNECTING TO COLAB..."
-                                ColabConnectionStatus.ERROR -> "COLAB SERVER ERROR"
-                                ColabConnectionStatus.NOT_CONFIGURED -> "DIRECT LINK ACTIVE"
+                                ColabConnectionStatus.CONNECTED -> "CLOUD SERVER ONLINE"
+                                ColabConnectionStatus.CONNECTING -> "CONNECTING TO SERVER..."
+                                ColabConnectionStatus.ERROR -> "SERVER OFFLINE"
+                                ColabConnectionStatus.NOT_CONFIGURED -> "NO SERVER CONFIGURED"
                             }
                         } else {
-                            "DIRECT P2P ACTIVE"
+                            "NO SERVER CONFIGURED"
                         }
 
                         Box(
