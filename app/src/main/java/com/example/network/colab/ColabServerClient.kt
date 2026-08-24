@@ -23,6 +23,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 enum class ColabConnectionStatus {
@@ -230,6 +231,43 @@ class ColabServerClient(private val context: Context) {
             null
         } catch (e: Exception) {
             Log.e(TAG, "Colab uploadFile error: ${e.message}", e)
+            null
+        }
+    }
+
+    suspend fun downloadFileToCache(relativeOrFullUrl: String): File? = withContext(Dispatchers.IO) {
+        try {
+            val fullUrl = getAbsoluteMediaUrl(relativeOrFullUrl)
+            if (fullUrl.isBlank()) return@withContext null
+
+            val request = Request.Builder()
+                .url(fullUrl)
+                .get()
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            if (!response.isSuccessful) {
+                Log.e(TAG, "Failed to download media: code=${response.code}")
+                return@withContext null
+            }
+
+            val body = response.body ?: return@withContext null
+            val cacheDir = File(context.cacheDir, "screamers").apply { mkdirs() }
+            val tempFile = File(cacheDir, "cached_screamer_${System.currentTimeMillis()}.mp4")
+
+            tempFile.outputStream().use { out ->
+                body.byteStream().copyTo(out)
+            }
+
+            if (tempFile.exists() && tempFile.length() > 0) {
+                Log.d(TAG, "Screamer video downloaded successfully: ${tempFile.absolutePath} (${tempFile.length()} bytes)")
+                tempFile
+            } else {
+                tempFile.delete()
+                null
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Colab downloadFileToCache error: ${e.message}", e)
             null
         }
     }

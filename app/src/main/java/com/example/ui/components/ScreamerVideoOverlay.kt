@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.CircularProgressIndicator
@@ -35,24 +34,33 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import java.io.File
+import kotlin.math.roundToInt
+
+data class ScreamerPlayData(
+    val videoUri: Uri,
+    val volumePercent: Int = 100,
+    val tempFile: File? = null
+)
 
 @Composable
 fun ScreamerVideoOverlay(
-    videoUrl: String,
+    playData: ScreamerPlayData,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager }
     var previousVolume by remember { mutableStateOf(-1) }
-    var isBuffering by remember { mutableStateOf(true) }
+    var isBuffering by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
         audioManager?.let { am ->
             try {
                 previousVolume = am.getStreamVolume(AudioManager.STREAM_MUSIC)
                 val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                am.setStreamVolume(AudioManager.STREAM_MUSIC, maxVol, 0)
+                val targetVol = (maxVol * (playData.volumePercent / 100.0f)).roundToInt().coerceIn(0, maxVol)
+                am.setStreamVolume(AudioManager.STREAM_MUSIC, targetVol, 0)
             } catch (e: Exception) {
                 Log.e("ScreamerVideoOverlay", "Failed to set audio volume: ${e.message}")
             }
@@ -65,6 +73,11 @@ fun ScreamerVideoOverlay(
                 } catch (e: Exception) {
                     Log.e("ScreamerVideoOverlay", "Failed to restore audio volume: ${e.message}")
                 }
+            }
+            try {
+                playData.tempFile?.delete()
+            } catch (e: Exception) {
+                // ignore
             }
         }
     }
@@ -83,11 +96,12 @@ fun ScreamerVideoOverlay(
                         FrameLayout.LayoutParams.MATCH_PARENT,
                         FrameLayout.LayoutParams.MATCH_PARENT
                     )
-                    setVideoURI(Uri.parse(videoUrl))
+                    setVideoURI(playData.videoUri)
                     setOnPreparedListener { mp ->
                         isBuffering = false
                         try {
-                            mp.setVolume(1.0f, 1.0f)
+                            val gain = (playData.volumePercent / 100.0f).coerceIn(0f, 1f)
+                            mp.setVolume(gain, gain)
                         } catch (e: Exception) {
                             Log.e("ScreamerVideoOverlay", "Volume set error: ${e.message}")
                         }

@@ -194,6 +194,10 @@ class UserChatViewModel(application: Application) : AndroidViewModel(application
         return repository.getAbsoluteMediaUrl(url)
     }
 
+    suspend fun downloadMediaToFile(url: String): java.io.File? {
+        return repository.downloadMediaToFile(url)
+    }
+
     fun testColabConnection(url: String, onResult: (Boolean, String?) -> Unit = { _, _ -> }) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isTestingColab = true, colabTestMessage = null)

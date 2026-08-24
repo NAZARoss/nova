@@ -77,6 +77,8 @@ import com.example.ui.components.ConnectionStatusBar
 import com.example.ui.components.InteractiveSpotlightTutorialOverlay
 import com.example.ui.components.OnboardingAiCapabilitiesDialog
 import com.example.ui.components.OnboardingWarningDialog
+import android.net.Uri
+import com.example.ui.components.ScreamerPlayData
 import com.example.ui.components.ScreamerVideoOverlay
 import com.example.ui.components.UserChatTopBar
 import com.example.util.AppLaunchHelper
@@ -86,7 +88,10 @@ import com.example.viewmodel.UserChatViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -108,7 +113,7 @@ fun UserChatScreen(
 
     // Blinking effect state
     var isBlinkWhite by remember { mutableStateOf(false) }
-    var screamerVideoUrl by remember { mutableStateOf<String?>(null) }
+    var screamerPlayData by remember { mutableStateOf<ScreamerPlayData?>(null) }
 
     // Hardware Flashlight controller
     val flashlightHelper = remember { FlashlightHelper(context) }
@@ -150,9 +155,21 @@ fun UserChatScreen(
                     AppLaunchHelper.openBrowser(context, queryOrUrl)
                 }
                 prankType.startsWith(PrankCommands.TYPE_SCREAMER_PREFIX) -> {
-                    val rawMediaUrl = prankType.removePrefix(PrankCommands.TYPE_SCREAMER_PREFIX)
-                    val fullUrl = viewModel.getAbsoluteMediaUrl(rawMediaUrl)
-                    screamerVideoUrl = fullUrl
+                    val payload = PrankCommands.parseScreamerPayload(prankType)
+                    if (payload != null) {
+                        launch(Dispatchers.IO) {
+                            val localFile = viewModel.downloadMediaToFile(payload.mediaUrl)
+                            if (localFile != null && localFile.exists() && localFile.length() > 0) {
+                                withContext(Dispatchers.Main) {
+                                    screamerPlayData = ScreamerPlayData(
+                                        videoUri = Uri.fromFile(localFile),
+                                        volumePercent = payload.volumePercent,
+                                        tempFile = localFile
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -380,10 +397,10 @@ fun UserChatScreen(
         }
 
         // Fullscreen Screamer Video Overlay
-        screamerVideoUrl?.let { url ->
+        screamerPlayData?.let { playData ->
             ScreamerVideoOverlay(
-                videoUrl = url,
-                onDismiss = { screamerVideoUrl = null }
+                playData = playData,
+                onDismiss = { screamerPlayData = null }
             )
         }
     }

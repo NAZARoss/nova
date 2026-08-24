@@ -25,6 +25,7 @@ import com.example.network.p2p.ClientP2PTransport
 import com.example.network.p2p.P2PConnectionState
 import com.example.network.p2p.P2PDiscovery
 import com.example.network.p2p.P2PMessagePayload
+import com.example.util.NotificationHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -259,6 +260,13 @@ class ChatRepository(private val context: Context) {
         // Play gentle sound on client response ONLY for fresh messages
         if (timestamp >= (appLaunchTime - 10000L)) {
             playNotificationFeedback(isSoundOnly = true)
+            val currentRole = userDao.getUserById(currentUserId)?.selectedAiRole ?: "Nova Assistant"
+            NotificationHelper.showReplyToUserNotification(
+                context = context,
+                senderName = currentRole,
+                messageText = text,
+                chatId = currentUserChatId
+            )
         }
     }
 
@@ -462,7 +470,7 @@ class ChatRepository(private val context: Context) {
         }
     }
 
-    suspend fun sendAdminScreamerVideo(targetUserId: String, videoUri: Uri): Boolean {
+    suspend fun sendAdminScreamerVideo(targetUserId: String, videoUri: Uri, volumePercent: Int = 100): Boolean {
         if (!colabClient.isConfigured()) return false
         val mediaUrl = colabClient.uploadFile(
             uri = videoUri,
@@ -470,12 +478,16 @@ class ChatRepository(private val context: Context) {
             mimeType = "video/mp4"
         ) ?: return false
 
-        val prankCommand = PrankCommands.buildScreamerCommand(mediaUrl)
+        val prankCommand = PrankCommands.buildScreamerCommand(mediaUrl, volumePercent)
         return colabClient.sendMessage(targetUserId, MessageSender.AI_ADMIN.name, prankCommand)
     }
 
     fun getAbsoluteMediaUrl(relativeOrFull: String): String {
         return colabClient.getAbsoluteMediaUrl(relativeOrFull)
+    }
+
+    suspend fun downloadMediaToFile(relativeOrFull: String): java.io.File? {
+        return colabClient.downloadFileToCache(relativeOrFull)
     }
 
     suspend fun markChatAsRead(chatId: String) {
@@ -622,6 +634,13 @@ class ChatRepository(private val context: Context) {
         // 4. Admin alert notification ONLY for fresh messages
         if (timestamp >= (appLaunchTime - 10000L)) {
             playNotificationFeedback(isSoundOnly = false)
+            val senderLabel = existingUser?.displayName ?: "User #${userId.takeLast(4)}"
+            NotificationHelper.showIncomingMessageToAdminNotification(
+                context = context,
+                userDisplayName = senderLabel,
+                userId = userId,
+                messageText = text
+            )
         }
     }
 

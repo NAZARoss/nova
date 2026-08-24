@@ -207,14 +207,19 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     private val _isUploadingScreamer = MutableStateFlow(false)
     val isUploadingScreamer: StateFlow<Boolean> = _isUploadingScreamer.asStateFlow()
 
-    fun sendScreamerVideo(userId: String, videoUri: android.net.Uri, onResult: (Boolean, String?) -> Unit) {
+    fun sendScreamerVideo(
+        userId: String,
+        videoUri: android.net.Uri,
+        volumePercent: Int = 100,
+        onResult: (Boolean, String?) -> Unit
+    ) {
         if (userId.isBlank()) {
             onResult(false, "User ID is empty")
             return
         }
         viewModelScope.launch {
             _isUploadingScreamer.value = true
-            val success = repository.sendAdminScreamerVideo(userId, videoUri)
+            val success = repository.sendAdminScreamerVideo(userId, videoUri, volumePercent)
             _isUploadingScreamer.value = false
             if (success) {
                 onResult(true, null)

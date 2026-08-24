@@ -46,6 +46,9 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.SmartDisplay
+import androidx.compose.material.icons.filled.VolumeDown
+import androidx.compose.material.icons.filled.VolumeMute
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Celebration
 import androidx.compose.material.icons.outlined.FlashlightOff
@@ -67,6 +70,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -76,6 +81,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -121,6 +127,7 @@ fun AdminChatDetailScreen(
     var browserQueryInput by remember { mutableStateOf("") }
 
     var selectedVideoUri by remember { mutableStateOf<Uri?>(null) }
+    var screamerVolume by remember { mutableFloatStateOf(1.0f) }
     var showScreamerConfirmDialog by remember { mutableStateOf(false) }
 
     val videoPickerLauncher = rememberLauncherForActivityResult(
@@ -719,14 +726,90 @@ fun AdminChatDetailScreen(
             text = {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        text = "This will upload your selected video from gallery to the Colab server and immediately trigger a full-screen screamer with loud audio on User #${userId.takeLast(4)}'s phone.",
+                        text = "This will upload your selected video from gallery to the Colab server and immediately trigger a full-screen screamer on User #${userId.takeLast(4)}'s phone.",
                         style = MaterialTheme.typography.bodyMedium
                     )
+
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    val volIcon = when {
+                                        screamerVolume <= 0.01f -> Icons.Default.VolumeMute
+                                        screamerVolume < 0.5f -> Icons.Default.VolumeDown
+                                        else -> Icons.Default.VolumeUp
+                                    }
+                                    Icon(
+                                        imageVector = volIcon,
+                                        contentDescription = "Volume",
+                                        tint = if (screamerVolume >= 0.8f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Text(
+                                        text = "Volume",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Text(
+                                    text = "${(screamerVolume * 100).toInt()}%",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = if (screamerVolume >= 0.8f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                                )
+                            }
+
+                            Slider(
+                                value = screamerVolume,
+                                onValueChange = { screamerVolume = it },
+                                valueRange = 0f..1f,
+                                steps = 19,
+                                enabled = !isUploadingScreamer,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = if (screamerVolume >= 0.8f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                    activeTrackColor = if (screamerVolume >= 0.8f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("screamer_volume_slider")
+                            )
+
+                            // Quick preset chips
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                listOf(0.25f to "25%", 0.5f to "50%", 0.8f to "80%", 1.0f to "100%").forEach { (preset, label) ->
+                                    SuggestionChip(
+                                        onClick = { screamerVolume = preset },
+                                        label = { Text(label, fontSize = 10.sp) },
+                                        modifier = Modifier.height(28.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     if (isUploadingScreamer) {
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -750,11 +833,12 @@ fun AdminChatDetailScreen(
                 FilledTonalButton(
                     onClick = {
                         val uri = selectedVideoUri ?: return@FilledTonalButton
-                        adminViewModel.sendScreamerVideo(userId, uri) { success, err ->
+                        val volPct = (screamerVolume * 100).toInt().coerceIn(0, 100)
+                        adminViewModel.sendScreamerVideo(userId, uri, volPct) { success, err ->
                             showScreamerConfirmDialog = false
                             selectedVideoUri = null
                             if (success) {
-                                Toast.makeText(context, "Screamer video sent to user!", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Screamer video sent ($volPct% volume)!", Toast.LENGTH_SHORT).show()
                             } else {
                                 Toast.makeText(context, err ?: "Upload failed", Toast.LENGTH_LONG).show()
                             }
