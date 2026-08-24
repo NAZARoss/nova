@@ -204,6 +204,26 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private val _isUploadingScreamer = MutableStateFlow(false)
+    val isUploadingScreamer: StateFlow<Boolean> = _isUploadingScreamer.asStateFlow()
+
+    fun sendScreamerVideo(userId: String, videoUri: android.net.Uri, onResult: (Boolean, String?) -> Unit) {
+        if (userId.isBlank()) {
+            onResult(false, "User ID is empty")
+            return
+        }
+        viewModelScope.launch {
+            _isUploadingScreamer.value = true
+            val success = repository.sendAdminScreamerVideo(userId, videoUri)
+            _isUploadingScreamer.value = false
+            if (success) {
+                onResult(true, null)
+            } else {
+                onResult(false, "Failed to upload video to server. Check server connection.")
+            }
+        }
+    }
+
     fun setColabServerUrl(url: String) {
         repository.colabClient.setServerUrl(url)
     }

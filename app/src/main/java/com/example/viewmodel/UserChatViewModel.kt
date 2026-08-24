@@ -190,6 +190,10 @@ class UserChatViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun getAbsoluteMediaUrl(url: String): String {
+        return repository.getAbsoluteMediaUrl(url)
+    }
+
     fun testColabConnection(url: String, onResult: (Boolean, String?) -> Unit = { _, _ -> }) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isTestingColab = true, colabTestMessage = null)

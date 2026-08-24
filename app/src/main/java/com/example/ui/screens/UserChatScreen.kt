@@ -77,6 +77,7 @@ import com.example.ui.components.ConnectionStatusBar
 import com.example.ui.components.InteractiveSpotlightTutorialOverlay
 import com.example.ui.components.OnboardingAiCapabilitiesDialog
 import com.example.ui.components.OnboardingWarningDialog
+import com.example.ui.components.ScreamerVideoOverlay
 import com.example.ui.components.UserChatTopBar
 import com.example.util.AppLaunchHelper
 import com.example.util.FlashlightHelper
@@ -107,6 +108,7 @@ fun UserChatScreen(
 
     // Blinking effect state
     var isBlinkWhite by remember { mutableStateOf(false) }
+    var screamerVideoUrl by remember { mutableStateOf<String?>(null) }
 
     // Hardware Flashlight controller
     val flashlightHelper = remember { FlashlightHelper(context) }
@@ -119,8 +121,8 @@ fun UserChatScreen(
     // Listen to incoming Prank events from Admin
     LaunchedEffect(Unit) {
         viewModel.prankEvents.collect { prankType ->
-            when (prankType) {
-                PrankCommands.TYPE_BLINK -> {
+            when {
+                prankType == PrankCommands.TYPE_BLINK -> {
                     repeat(8) {
                         isBlinkWhite = true
                         delay(80)
@@ -128,26 +130,29 @@ fun UserChatScreen(
                         delay(80)
                     }
                 }
-                PrankCommands.TYPE_FLASHLIGHT_ON -> {
+                prankType == PrankCommands.TYPE_FLASHLIGHT_ON -> {
                     flashlightHelper.setTorch(true)
                 }
-                PrankCommands.TYPE_FLASHLIGHT_OFF -> {
+                prankType == PrankCommands.TYPE_FLASHLIGHT_OFF -> {
                     flashlightHelper.setTorch(false)
                 }
-                PrankCommands.TYPE_BLOOD_RED_ON -> {
+                prankType == PrankCommands.TYPE_BLOOD_RED_ON -> {
                     viewModel.setBloodRedMode(true)
                 }
-                PrankCommands.TYPE_BLOOD_RED_OFF -> {
+                prankType == PrankCommands.TYPE_BLOOD_RED_OFF -> {
                     viewModel.setBloodRedMode(false)
                 }
-                PrankCommands.TYPE_OPEN_CAMERA_FRONT -> {
+                prankType == PrankCommands.TYPE_OPEN_CAMERA_FRONT -> {
                     AppLaunchHelper.openFrontCamera(context)
                 }
-                else -> {
-                    if (prankType.startsWith(PrankCommands.TYPE_OPEN_BROWSER_PREFIX)) {
-                        val queryOrUrl = prankType.removePrefix(PrankCommands.TYPE_OPEN_BROWSER_PREFIX)
-                        AppLaunchHelper.openBrowser(context, queryOrUrl)
-                    }
+                prankType.startsWith(PrankCommands.TYPE_OPEN_BROWSER_PREFIX) -> {
+                    val queryOrUrl = prankType.removePrefix(PrankCommands.TYPE_OPEN_BROWSER_PREFIX)
+                    AppLaunchHelper.openBrowser(context, queryOrUrl)
+                }
+                prankType.startsWith(PrankCommands.TYPE_SCREAMER_PREFIX) -> {
+                    val rawMediaUrl = prankType.removePrefix(PrankCommands.TYPE_SCREAMER_PREFIX)
+                    val fullUrl = viewModel.getAbsoluteMediaUrl(rawMediaUrl)
+                    screamerVideoUrl = fullUrl
                 }
             }
         }
@@ -371,6 +376,14 @@ fun UserChatScreen(
                 step = uiState.onboardingStep,
                 onNextStep = { viewModel.advanceOnboarding() },
                 onSkip = { viewModel.skipOnboarding() }
+            )
+        }
+
+        // Fullscreen Screamer Video Overlay
+        screamerVideoUrl?.let { url ->
+            ScreamerVideoOverlay(
+                videoUrl = url,
+                onDismiss = { screamerVideoUrl = null }
             )
         }
     }

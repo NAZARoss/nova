@@ -2,6 +2,7 @@ package com.example.network.colab
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.net.Uri
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -17,6 +18,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -44,9 +46,9 @@ class ColabServerClient(private val context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("nova_colab_prefs", Context.MODE_PRIVATE)
 
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(5, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
-        .writeTimeout(5, TimeUnit.SECONDS)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
 
@@ -86,10 +88,29 @@ class ColabServerClient(private val context: Context) {
         return trimmed.trimEnd('/')
     }
 
+    fun getAbsoluteMediaUrl(relativeOrFull: String): String {
+        val trimmed = relativeOrFull.trim()
+        if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+            return trimmed
+        }
+        val base = _serverUrl.value.trimEnd('/')
+        val path = if (trimmed.startsWith("/")) trimmed else "/$trimmed"
+        return "$base$path"
+    }
+
+    fun resetPollingCursors() {
+        prefs.edit().apply {
+            prefs.all.keys.filter { it.startsWith(KEY_LAST_USER_SINCE_PREFIX) || it == KEY_LAST_ADMIN_SINCE }.forEach {
+                remove(it)
+            }
+        }.apply()
+    }
+
     fun setServerUrl(url: String) {
         val cleaned = cleanUrl(url)
         _serverUrl.value = cleaned
         prefs.edit().putString(KEY_SERVER_URL, cleaned).apply()
+        resetPollingCursors()
 
         stopUserPolling()
         stopAdminPolling()
@@ -175,11 +196,50 @@ class ColabServerClient(private val context: Context) {
         }
     }
 
+    suspend fun uploadFile(
+        uri: Uri,
+        fileName: String = "screamer_video.mp4",
+        mimeType: String = "video/mp4"
+    ): String? = withContext(Dispatchers.IO) {
+        val url = _serverUrl.value
+        if (url.isBlank()) return@withContext null
+
+        try {
+            val inputStream = context.contentResolver.openInputStream(uri) ?: return@withContext null
+            val bytes = inputStream.use { it.readBytes() }
+            val reqBody = bytes.toRequestBody(mimeType.toMediaType())
+
+            val multipartBody = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("file", fileName, reqBody)
+                .build()
+
+            val request = Request.Builder()
+                .url("$url/api/upload")
+                .post(multipartBody)
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            if (response.isSuccessful) {
+                val bodyString = response.body?.string() ?: ""
+                val json = JSONObject(bodyString)
+                if (json.optString("status") == "ok") {
+                    return@withContext json.optString("mediaUrl")
+                }
+            }
+            null
+        } catch (e: Exception) {
+            Log.e(TAG, "Colab uploadFile error: ${e.message}", e)
+            null
+        }
+    }
+
     suspend fun clearMessagesOnServer(userId: String? = null): Boolean = withContext(Dispatchers.IO) {
         val url = _serverUrl.value
         if (url.isBlank()) return@withContext false
 
         try {
+            resetPollingCursors()
             val endpoint = if (userId != null) "$url/api/clear?userId=$userId" else "$url/api/clear"
             val mediaType = "application/json; charset=utf-8".toMediaType()
             val emptyBody = "{}".toRequestBody(mediaType)
@@ -200,7 +260,7 @@ class ColabServerClient(private val context: Context) {
         currentPollingUserId = userId
         userPollJob?.cancel()
         userPollJob = scope.launch {
-            var lastSeenSince = 0
+            var lastSeenSince = prefs.getInt("$KEY_LAST_USER_SINCE_PREFIX$userId", 0)
             var consecutiveErrors = 0
 
             while (isActive) {
@@ -239,6 +299,7 @@ class ColabServerClient(private val context: Context) {
                                     }
                                 }
                                 lastSeenSince += count
+                                prefs.edit().putInt("$KEY_LAST_USER_SINCE_PREFIX$userId", lastSeenSince).apply()
                             }
                         }
                     } else {
@@ -267,7 +328,7 @@ class ColabServerClient(private val context: Context) {
     fun startAdminPolling() {
         adminPollJob?.cancel()
         adminPollJob = scope.launch {
-            var lastSeenAdminSince = 0
+            var lastSeenAdminSince = prefs.getInt(KEY_LAST_ADMIN_SINCE, 0)
             var consecutiveErrors = 0
 
             while (isActive) {
@@ -305,6 +366,7 @@ class ColabServerClient(private val context: Context) {
                                     }
                                 }
                                 lastSeenAdminSince += count
+                                prefs.edit().putInt(KEY_LAST_ADMIN_SINCE, lastSeenAdminSince).apply()
                             }
                         }
                     } else {
@@ -333,5 +395,7 @@ class ColabServerClient(private val context: Context) {
     companion object {
         private const val TAG = "ColabServerClient"
         private const val KEY_SERVER_URL = "colab_tunnel_url"
+        private const val KEY_LAST_USER_SINCE_PREFIX = "colab_last_user_since_"
+        private const val KEY_LAST_ADMIN_SINCE = "colab_last_admin_since"
     }
 }
